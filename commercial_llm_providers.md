@@ -1,0 +1,21 @@
+As of **April 20, 2026**, here’s the practical shortlist I’d use for **PHI + BAA**.
+
+**Likely pass for PHI, if configured correctly**
+- **Azure OpenAI on Azure**: Likely pass. Microsoft says Azure customers get HIPAA BAA coverage through the Product Terms/DPA, and Azure OpenAI is generally treated as HIPAA-eligible under that umbrella. I would still require written confirmation for the exact features you plan to use, especially agent-style or multimodal features. Sources: [Microsoft HIPAA on Azure](https://learn.microsoft.com/en-us/azure/compliance/offerings/offering-hipaa-us), [Microsoft Q&A on Azure OpenAI HIPAA/BAA](https://learn.microsoft.com/en-us/answers/questions/2258799/does-azure-openai-services-provide-hipaa-complianc)
+- **Amazon Bedrock on AWS**: Likely pass. AWS has a standard BAA, and Bedrock appears in AWS HIPAA-eligible scope materials. Bedrock also has strong IAM/private networking controls, which helps your harness use case. Sources: [AWS HIPAA compliance](https://aws.amazon.com/compliance/hipaa-compliance/), [AWS services in scope for HIPAA BAA](https://aws.amazon.com/compliance/services-in-scope/HIPAA_BAA/), [Bedrock data protection](https://docs.aws.amazon.com/bedrock/latest/userguide/data-protection.html)
+- **Google Cloud Vertex AI / related Vertex AI Search and RAG services**: Likely pass. Google says customers using PHI must accept a BAA, and Google documents HIPAA coverage for Google Cloud plus specific Vertex AI Search/RAG controls. I would still verify the exact Vertex AI generative features you need. Sources: [Google Cloud HIPAA compliance](https://cloud.google.com/security/compliance/hipaa-compliance?hl=en), [Vertex AI Search compliance controls](https://docs.cloud.google.com/generative-ai-app-builder/docs/compliance-security-controls), [Vertex AI security controls](https://cloud.google.com/vertex-ai/docs/general/vertexai-security-controls)
+
+**Conditional pass**
+- **OpenAI API direct**: Conditional pass. OpenAI says PHI use requires a BAA, but only **zero-retention-eligible endpoints** are covered. So this is not a blanket “OpenAI passes”; only a narrowed subset passes. Source: [OpenAI BAA for API services](https://help.openai.com/en/articles/8660679-how-can-i-get-a-business-associate)
+- **Anthropic API direct**: Conditional pass. Anthropic says it **may** provide a BAA for certain HIPAA-eligible services, typically tied to zero data retention, and it explicitly says some features may not be covered. Source: [Anthropic BAA guidance](https://support.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)
+- **Self-hosted / local compute**: Conditional pass. This can work for PHI if the model runs entirely inside your governed environment and every infra/operator/vendor touching PHI is contractually and technically covered. There is no vendor BAA “for the model” in the same way as a managed API, so this becomes an architecture-and-operations compliance exercise.
+
+**Likely fail for PHI**
+- **ChatGPT Business**: Fail. OpenAI explicitly says it does **not** offer a BAA for ChatGPT Business. Source: [OpenAI BAA for API services](https://help.openai.com/en/articles/8660679-how-can-i-get-a-business-associate)
+- **Claude.ai Free / Pro / Max, Workbench, Console, general Claude for Work Team/Enterprise**: Fail for PHI. Anthropic explicitly says those are not covered by its BAA. Source: [Anthropic BAA guidance](https://support.anthropic.com/en/articles/8114513-business-associate-agreements-baa-for-commercial-customers)
+- **Any consumer chat product with no explicit BAA and no feature-level HIPAA statement**: Fail by policy. For strict PHI, if the vendor docs are vague, treat it as fail until cleared in writing.
+
+**My recommendation**
+For your use case, I’d start with **Azure OpenAI, Bedrock, and Vertex AI** as the primary “pass candidates,” and keep **OpenAI direct** and **Anthropic direct** as narrower conditional options only if the exact covered endpoints/features match your design. I would exclude consumer chat products entirely.
+
+If you want, I can turn this into a filled-in version of your `provider_scorecard.csv` with `PASS / CONDITIONAL / FAIL` rows for each provider.
