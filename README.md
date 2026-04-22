@@ -15,6 +15,7 @@ The evaluation is intentionally biased toward:
 - `provider_scorecard.csv`: Pass/fail and weighted comparison template for providers and deployment tracks
 - `phi_data_flow_inventory.md`: PHI entry, transformation, storage, logging, and exit inventory
 - `reference_architecture.md`: Reference architecture for hyperscaler-managed and self-hosted deployments
+- `secure_coding_harness_design.md`: Implementation design for an isolated coding harness that cannot directly access PHI
 - `decision_memo_template.md`: Decision document template to capture the final recommendation and rationale
 
 ## How to use this pack
