@@ -1,0 +1,30 @@
+# AutoDQA — Database Configuration Example
+#
+# Copy this file and fill in your CDW connection details.
+# The file path is passed to run.sh via --db-config.
+#
+# All MCP tool servers that need database access read the DB_CONFIG
+# environment variable to find this file.
+
+id: "cdw"
+name: "Clinical Data Warehouse"
+engine: "mssql"
+cdm: "pcornet"
+
+connection:
+  driver: "ODBC Driver 17 for SQL Server"
+  server: "your-server-name"
+  database: "your-database-name"
+  trusted_connection: "yes"
+  # For SQL auth instead of Windows auth, uncomment:
+  # uid: "your-username"
+  # pwd: "your-password"
+
+# Path to the ETL codebase (used by etl_reader and doc_search tools)
+etl_repo: "/home/atth/gitlab/cdw"
+
+# Tables to profile (v1 scope)
+tables:
+  - DEMOGRAPHIC
+  - ENCOUNTER
+  - DIAGNOSIS
