@@ -21,6 +21,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ── Activate venv ──
+
+if [[ -d "$SCRIPT_DIR/.venv" ]]; then
+  source "$SCRIPT_DIR/.venv/bin/activate"
+elif [[ -d "$SCRIPT_DIR/venv" ]]; then
+  source "$SCRIPT_DIR/venv/bin/activate"
+fi
+
 # ── Preflight checks ──
 
 if ! command -v claude &>/dev/null; then
@@ -29,11 +37,10 @@ if ! command -v claude &>/dev/null; then
   exit 1
 fi
 
-if ! python -c "import mcp, pyodbc, yaml" 2>/dev/null; then
-  PY_PATH="$(command -v python 2>/dev/null || echo '<python not on PATH>')"
-  echo "Error: MCP server dependencies missing from $PY_PATH" >&2
-  echo "Install with:" >&2
-  echo "  $PY_PATH -m pip install mcp pyodbc pyyaml" >&2
+if ! python3 -c "import mcp, pyodbc, yaml" 2>/dev/null; then
+  echo "Error: MCP server dependencies missing." >&2
+  echo "Set up the venv with:" >&2
+  echo "  python3 -m venv .venv && .venv/bin/pip install mcp[cli] pyodbc pyyaml" >&2
   exit 1
 fi
 
@@ -43,6 +50,7 @@ DB_CONFIG=""
 TABLES=""
 RESUME_MODE=""
 MAX_TURNS="50"
+CUSTOM_TASK=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,13 +69,17 @@ while [[ $# -gt 0 ]]; do
     --resume-from-report)
       RESUME_MODE="report"; shift
       ;;
+    --task)
+      CUSTOM_TASK="$2"; shift 2
+      ;;
     --help|-h)
-      echo "Usage: ./run.sh --db-config <path> [--tables TABLE,TABLE,...] [--resume-from-*] [max_turns]"
+      echo "Usage: ./run.sh --db-config <path> [--tables TABLE,TABLE,...] [--resume-from-*] [--task \"...\"] [max_turns]"
       echo ""
       echo "Options:"
       echo "  --db-config <path>         Path to database YAML config (required)"
       echo "  --tables <list>            Comma-separated tables to profile"
       echo "                             (default: from config file)"
+      echo "  --task <prompt>            Custom task instead of full DQA pipeline"
       echo "  --resume-from-analysis     Skip profiling, start from issue detection"
       echo "  --resume-from-investigation  Skip to root cause investigation"
       echo "  --resume-from-report       Skip to report generation"
@@ -97,12 +109,12 @@ fi
 
 # ── Load config ──
 
-DB_ID=$(python -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['id'])")
-DB_NAME=$(python -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['name'])")
-ETL_REPO=$(python -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['etl_repo'])")
+DB_ID=$(python3 -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['id'])")
+DB_NAME=$(python3 -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['name'])")
+ETL_REPO=$(python3 -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['etl_repo'])")
 
 if [[ -z "$TABLES" ]]; then
-  TABLES=$(python -c "
+  TABLES=$(python3 -c "
 import yaml
 cfg = yaml.safe_load(open('$DB_CONFIG'))
 print(','.join(cfg.get('tables', ['DEMOGRAPHIC', 'ENCOUNTER', 'DIAGNOSIS'])))
@@ -130,6 +142,9 @@ echo " Results:     $RESULTS_DIR"
 echo " Max turns:   $MAX_TURNS"
 if [[ -n "$RESUME_MODE" ]]; then
   echo " Resume from: $RESUME_MODE"
+fi
+if [[ -n "$CUSTOM_TASK" ]]; then
+  echo " Custom task: $CUSTOM_TASK"
 fi
 echo "============================================="
 echo ""
@@ -167,6 +182,33 @@ if [[ -n "$RESUME_MODE" ]]; then
   RESUME_INSTRUCTION="RESUME MODE: --resume-from-$RESUME_MODE was passed. Skip earlier phases and start from the $RESUME_MODE phase. Verify that required input files from previous phases exist before proceeding."
 fi
 
+if [[ -n "$CUSTOM_TASK" ]]; then
+COORDINATOR_PROMPT=$(cat <<ENDPROMPT
+You are an agent with access to a clinical data warehouse and its ETL codebase.
+
+## Run Configuration
+
+- Database: $DB_NAME (id: $DB_ID)
+- ETL Repo: $ETL_REPO
+- Tables available: $TABLES
+- Results directory: $RESULTS_DIR
+- DB config: $DB_CONFIG
+- MCP config: $MCP_CONFIG
+
+## Tools Available
+
+You have MCP tools for:
+- Executing SQL queries against the database (mcp__sql_executor__execute_sql)
+- Reading ETL code (mcp__etl_reader__read_etl_file, mcp__etl_reader__search_etl, mcp__etl_reader__list_etl_files)
+- Querying CDM specifications (mcp__spec_query__get_table_spec, mcp__spec_query__get_valuesets, mcp__spec_query__get_constraints)
+- Searching documentation (mcp__doc_search__search_docs, mcp__doc_search__read_doc, mcp__doc_search__list_docs)
+
+## Your Task
+
+$CUSTOM_TASK
+ENDPROMPT
+)
+else
 COORDINATOR_PROMPT=$(cat <<ENDPROMPT
 You are the coordinator agent for AutoDQA. Read COORDINATOR.md for your full instructions.
 
@@ -197,6 +239,7 @@ $RESUME_INSTRUCTION
 Begin by reading COORDINATOR.md, then start Phase 0.
 ENDPROMPT
 )
+fi
 
 # ── Launch coordinator ──
 

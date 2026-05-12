@@ -12,16 +12,18 @@ engine: "mssql"
 cdm: "pcornet"
 
 connection:
-  driver: "ODBC Driver 17 for SQL Server"
-  server: "your-server-name"
-  database: "your-database-name"
-  trusted_connection: "yes"
-  # For SQL auth instead of Windows auth, uncomment:
-  # uid: "your-username"
-  # pwd: "your-password"
+  driver: "ODBC Driver 18 for SQL Server"
+  server: "<SERVER_NAME>"
+  database: "<DATABASE_NAME>"
+  # For Windows auth:
+  # trusted_connection: "yes"
+  # For SQL auth:
+  # uid: "<USERNAME>"
+  # pwd: "<PASSWORD>"
+  TrustServerCertificate: "yes"
 
 # Path to the ETL codebase (used by etl_reader and doc_search tools)
-etl_repo: "/home/atth/gitlab/cdw"
+etl_repo: "<PATH_TO_ETL_REPO>"
 
 # Tables to profile (v1 scope)
 tables:

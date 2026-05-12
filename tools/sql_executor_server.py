@@ -51,11 +51,15 @@ def _get_connection():
         f"DRIVER={{{conn_cfg['driver']}}};"
         f"SERVER={conn_cfg['server']};"
         f"DATABASE={conn_cfg['database']};"
-        f"Trusted_Connection={conn_cfg.get('trusted_connection', 'yes')};"
     )
 
     if conn_cfg.get("uid"):
         conn_str += f"UID={conn_cfg['uid']};PWD={conn_cfg['pwd']};"
+    else:
+        conn_str += f"Trusted_Connection={conn_cfg.get('trusted_connection', 'yes')};"
+
+    if conn_cfg.get("TrustServerCertificate"):
+        conn_str += f"TrustServerCertificate={conn_cfg['TrustServerCertificate']};"
 
     _connection = pyodbc.connect(conn_str, readonly=True)
     _connection.autocommit = True
