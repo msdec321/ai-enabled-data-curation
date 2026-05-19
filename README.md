@@ -67,13 +67,13 @@ echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://
 sudo apt update && sudo ACCEPT_EULA=Y apt install -y msodbcsql18
 ```
 
-### 3. Configure your database connection
+### 3. Configure the project
 
 ```bash
-cp databases/cdw_example.yaml databases/cdw.yaml
+cp config.example.yaml config.yaml
 ```
 
-Edit `databases/cdw.yaml` with your connection details:
+Edit `config.yaml` with your connection details and source paths:
 
 ```yaml
 id: "cdw"
@@ -89,7 +89,13 @@ connection:
   pwd: "<PASSWORD>"
   TrustServerCertificate: "yes"
 
-etl_repo: "<PATH_TO_ETL_REPO>"
+sources:
+  etl:
+    path: "<PATH_TO_ETL_REPO>"
+  documentation:
+    paths:
+      - "<PATH_TO_ETL_REPO>/Documentation"
+      - "<PATH_TO_ETL_REPO>/docs"
 
 tables:
   - DEMOGRAPHIC
@@ -100,7 +106,8 @@ tables:
 **Notes:**
 - For Windows Authentication, replace `uid`/`pwd` with `trusted_connection: "yes"`
 - If connecting from WSL2 to a local SQL Server, use `127.0.0.1` as the server (WSL2 mirrored networking) or the Windows host IP from `cat /etc/resolv.conf`
-- `etl_repo` should point to the local path of your ETL codebase
+- `sources.etl.path` should point to the local path of your ETL codebase
+- `sources.documentation.paths` lists directories containing markdown documentation — these can be inside or outside the ETL repo
 - `tables` lists the CDM tables to assess
 
 ## Usage
@@ -108,7 +115,7 @@ tables:
 ### Full DQA pipeline
 
 ```bash
-./run.sh --db-config databases/cdw.yaml
+./run.sh --config config.yaml
 ```
 
 ### Custom task
@@ -116,14 +123,14 @@ tables:
 Bypass the full pipeline and give the agent a specific task:
 
 ```bash
-./run.sh --db-config databases/cdw.yaml --task "Query the DEMOGRAPHIC table and tell me how many rows there are"
+./run.sh --config config.yaml --task "Query the DEMOGRAPHIC table and tell me how many rows there are"
 ```
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--db-config <path>` | Path to database YAML config (required) |
+| `--config <path>` | Path to YAML config file (required) |
 | `--tables <list>` | Comma-separated tables to profile (default: from config) |
 | `--task "<prompt>"` | Custom task instead of full DQA pipeline |
 | `--resume-from-analysis` | Skip profiling, start from issue detection |
@@ -136,9 +143,9 @@ Bypass the full pipeline and give the agent a specific task:
 If a run is interrupted, resume from the last completed phase:
 
 ```bash
-./run.sh --db-config databases/cdw.yaml --resume-from-analysis
-./run.sh --db-config databases/cdw.yaml --resume-from-investigation
-./run.sh --db-config databases/cdw.yaml --resume-from-report
+./run.sh --config config.yaml --resume-from-analysis
+./run.sh --config config.yaml --resume-from-investigation
+./run.sh --config config.yaml --resume-from-report
 ```
 
 ### Output

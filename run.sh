@@ -5,10 +5,10 @@
 # Launches the coordinator agent for autonomous data quality assessment.
 #
 # Usage:
-#   ./run.sh --db-config databases/my_cdw.yaml
-#   ./run.sh --db-config databases/my_cdw.yaml --tables DEMOGRAPHIC,ENCOUNTER
-#   ./run.sh --db-config databases/my_cdw.yaml --resume-from-report
-#   ./run.sh --db-config databases/my_cdw.yaml 75  # max turns
+#   ./run.sh --config config.yaml
+#   ./run.sh --config config.yaml --tables DEMOGRAPHIC,ENCOUNTER
+#   ./run.sh --config config.yaml --resume-from-report
+#   ./run.sh --config config.yaml 75  # max turns
 #
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
@@ -46,7 +46,7 @@ fi
 
 # ── Parse arguments ──
 
-DB_CONFIG=""
+CONFIG=""
 TABLES=""
 RESUME_MODE=""
 MAX_TURNS="50"
@@ -54,8 +54,8 @@ CUSTOM_TASK=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --db-config)
-      DB_CONFIG="$2"; shift 2
+    --config)
+      CONFIG="$2"; shift 2
       ;;
     --tables)
       TABLES="$2"; shift 2
@@ -73,10 +73,10 @@ while [[ $# -gt 0 ]]; do
       CUSTOM_TASK="$2"; shift 2
       ;;
     --help|-h)
-      echo "Usage: ./run.sh --db-config <path> [--tables TABLE,TABLE,...] [--resume-from-*] [--task \"...\"] [max_turns]"
+      echo "Usage: ./run.sh --config <path> [--tables TABLE,TABLE,...] [--resume-from-*] [--task \"...\"] [max_turns]"
       echo ""
       echo "Options:"
-      echo "  --db-config <path>         Path to database YAML config (required)"
+      echo "  --config <path>            Path to YAML config file (required)"
       echo "  --tables <list>            Comma-separated tables to profile"
       echo "                             (default: from config file)"
       echo "  --task <prompt>            Custom task instead of full DQA pipeline"
@@ -96,27 +96,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$DB_CONFIG" ]]; then
-  echo "Error: --db-config is required." >&2
-  echo "Usage: ./run.sh --db-config databases/my_cdw.yaml" >&2
+if [[ -z "$CONFIG" ]]; then
+  echo "Error: --config is required." >&2
+  echo "Usage: ./run.sh --config config.yaml" >&2
   exit 2
 fi
 
-if [[ ! -f "$DB_CONFIG" ]]; then
-  echo "Error: Config file not found: $DB_CONFIG" >&2
+if [[ ! -f "$CONFIG" ]]; then
+  echo "Error: Config file not found: $CONFIG" >&2
   exit 2
 fi
 
 # ── Load config ──
 
-DB_ID=$(python3 -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['id'])")
-DB_NAME=$(python3 -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['name'])")
-ETL_REPO=$(python3 -c "import yaml; print(yaml.safe_load(open('$DB_CONFIG'))['etl_repo'])")
+DB_ID=$(python3 -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['id'])")
+DB_NAME=$(python3 -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['name'])")
+ETL_REPO=$(python3 -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['sources']['etl']['path'])")
+DOC_PATHS=$(python3 -c "
+import yaml, json
+cfg = yaml.safe_load(open('$CONFIG'))
+print(json.dumps(cfg['sources']['documentation']['paths']))
+")
 
 if [[ -z "$TABLES" ]]; then
   TABLES=$(python3 -c "
 import yaml
-cfg = yaml.safe_load(open('$DB_CONFIG'))
+cfg = yaml.safe_load(open('$CONFIG'))
 print(','.join(cfg.get('tables', ['DEMOGRAPHIC', 'ENCOUNTER', 'DIAGNOSIS'])))
 ")
 fi
@@ -137,6 +142,7 @@ echo " AutoDQA — Data Quality Assessment"
 echo "============================================="
 echo " Database:    $DB_NAME ($DB_ID)"
 echo " ETL Repo:    $ETL_REPO"
+echo " Doc Paths:   $DOC_PATHS"
 echo " Tables:      $TABLES"
 echo " Results:     $RESULTS_DIR"
 echo " Max turns:   $MAX_TURNS"
@@ -166,8 +172,9 @@ REVIEWER_TOOLS="$REVIEWER_TOOLS,mcp__doc_search__search_docs,mcp__doc_search__re
 
 # ── Export environment for coordinator and MCP servers ──
 
-export DB_CONFIG="$SCRIPT_DIR/$DB_CONFIG"
+export CONFIG="$SCRIPT_DIR/$CONFIG"
 export ETL_REPO="$ETL_REPO"
+export DOC_PATHS="$DOC_PATHS"
 export RESULTS_DIR="$RESULTS_DIR"
 export TABLES="$TABLES"
 export MAX_TURNS="$MAX_TURNS"
@@ -192,7 +199,7 @@ You are an agent with access to a clinical data warehouse and its ETL codebase.
 - ETL Repo: $ETL_REPO
 - Tables available: $TABLES
 - Results directory: $RESULTS_DIR
-- DB config: $DB_CONFIG
+- Config: $CONFIG
 - MCP config: $MCP_CONFIG
 
 ## Tools Available
@@ -218,7 +225,7 @@ You are the coordinator agent for AutoDQA. Read COORDINATOR.md for your full ins
 - ETL Repo: $ETL_REPO
 - Tables to assess: $TABLES
 - Results directory: $RESULTS_DIR
-- DB config: $DB_CONFIG
+- Config: $CONFIG
 - MCP config: $MCP_CONFIG
 - Max turns per sub-agent: $MAX_TURNS
 
@@ -227,7 +234,8 @@ You are the coordinator agent for AutoDQA. Read COORDINATOR.md for your full ins
 These are set in your environment and in sub-agent environments:
 - \$RESULTS_DIR = $RESULTS_DIR
 - \$ETL_REPO = $ETL_REPO
-- \$DB_CONFIG = $DB_CONFIG
+- \$DOC_PATHS = $DOC_PATHS
+- \$CONFIG = $CONFIG
 - \$MCP_CONFIG = $MCP_CONFIG
 - \$MAX_TURNS = $MAX_TURNS
 - \$TABLES = $TABLES
