@@ -27,9 +27,9 @@ FORBIDDEN_KEYWORDS = [
 
 def _load_config():
     global _db_config
-    config_path = os.environ.get("DB_CONFIG")
+    config_path = os.environ.get("CONFIG")
     if not config_path:
-        raise RuntimeError("DB_CONFIG environment variable not set")
+        raise RuntimeError("CONFIG environment variable not set")
     with open(config_path, "r") as f:
         _db_config = yaml.safe_load(f)
     return _db_config

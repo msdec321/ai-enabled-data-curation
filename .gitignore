@@ -4,5 +4,4 @@ __pycache__/
 .venv/
 results/
 !results/.gitkeep
-databases/*.yaml
-!databases/cdw_example.yaml
+config.yaml

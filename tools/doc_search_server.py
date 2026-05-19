@@ -1,8 +1,8 @@
 """AutoDQA — Documentation Search MCP Server
 
-Search and read documentation markdown files from the ETL repository.
-Covers PCORNet CDM+ docs, Clarity view docs, Allscripts/Centricity docs,
-and other project documentation.
+Search and read documentation markdown files from configured documentation
+directories. Covers PCORNet CDM+ docs, Clarity view docs, Allscripts/Centricity
+docs, and other project documentation.
 """
 
 import json
@@ -13,39 +13,25 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("doc_search")
 
-_etl_repo = None
-_doc_dirs = [
-    "Documentation",
-    "docs",
-]
-
-
-def _get_etl_repo() -> Path:
-    global _etl_repo
-    if _etl_repo is None:
-        repo_path = os.environ.get("ETL_REPO")
-        if not repo_path:
-            raise RuntimeError("ETL_REPO environment variable not set")
-        _etl_repo = Path(repo_path)
-    return _etl_repo
+_doc_paths = None
 
 
 def _get_doc_paths() -> list[Path]:
-    """Return all documentation directories that exist."""
-    repo = _get_etl_repo()
-    paths = []
-    for d in _doc_dirs:
-        full = repo / d
-        if full.is_dir():
-            paths.append(full)
-    return paths
+    """Return all configured documentation directories that exist."""
+    global _doc_paths
+    if _doc_paths is None:
+        raw = os.environ.get("DOC_PATHS")
+        if not raw:
+            raise RuntimeError("DOC_PATHS environment variable not set")
+        _doc_paths = [Path(p) for p in json.loads(raw) if Path(p).is_dir()]
+    return _doc_paths
 
 
 @mcp.tool()
 def search_docs(query: str, max_results: int = 30) -> str:
     """Search documentation files for a keyword or phrase.
 
-    Searches all markdown files in the ETL repo's Documentation/ directory
+    Searches all markdown files in the configured documentation directories
     for the given query string (case-insensitive).
 
     Args:
@@ -56,11 +42,10 @@ def search_docs(query: str, max_results: int = 30) -> str:
     Returns:
         JSON with matching file paths, line numbers, and content.
     """
-    repo = _get_etl_repo()
     doc_paths = _get_doc_paths()
 
     if not doc_paths:
-        return json.dumps({"error": "No documentation directories found in ETL repo"})
+        return json.dumps({"error": "No documentation directories found"})
 
     matches = []
     for doc_dir in doc_paths:
@@ -84,9 +69,9 @@ def search_docs(query: str, max_results: int = 30) -> str:
             parts = line.split(":", 2)
             if len(parts) >= 3:
                 filepath, lineno, content = parts[0], parts[1], parts[2]
-                rel_path = os.path.relpath(filepath, str(repo))
+                rel_path = os.path.relpath(filepath, str(doc_dir))
                 matches.append({
-                    "file": rel_path,
+                    "file": f"{doc_dir.name}/{rel_path}",
                     "line": int(lineno),
                     "content": content.strip(),
                 })
@@ -100,34 +85,52 @@ def search_docs(query: str, max_results: int = 30) -> str:
     })
 
 
+def _resolve_doc_path(path: str) -> tuple[Path | None, Path | None]:
+    """Resolve a doc path and find which doc root it belongs to.
+
+    Returns (full_path, doc_root) or (None, None) if not found/allowed.
+    """
+    doc_paths = _get_doc_paths()
+
+    if os.path.isabs(path):
+        full_path = Path(path)
+    else:
+        for doc_dir in doc_paths:
+            candidate = doc_dir / path
+            if candidate.is_file():
+                full_path = candidate
+                break
+        else:
+            return None, None
+
+    try:
+        resolved = full_path.resolve()
+        for doc_dir in doc_paths:
+            if str(resolved).startswith(str(doc_dir.resolve())):
+                return full_path, doc_dir
+    except Exception:
+        pass
+    return None, None
+
+
 @mcp.tool()
 def read_doc(path: str) -> str:
     """Read a documentation markdown file.
 
     Args:
-        path: Relative path within the ETL repo (e.g.,
-              "Documentation/PCORNet_CDM+/DEMOGRAPHIC.md") or absolute path.
+        path: Relative path within a documentation directory (e.g.,
+              "PCORNet_CDM+/DEMOGRAPHIC.md") or absolute path.
 
     Returns:
         JSON with file contents.
     """
-    repo = _get_etl_repo()
+    full_path, doc_root = _resolve_doc_path(path)
 
-    if os.path.isabs(path):
-        full_path = Path(path)
-    else:
-        full_path = repo / path
+    if full_path is None:
+        return json.dumps({"error": f"File not found or outside documentation directories: {path}"})
 
     if not full_path.is_file():
         return json.dumps({"error": f"File not found: {path}"})
-
-    try:
-        resolved = full_path.resolve()
-        repo_resolved = repo.resolve()
-        if not str(resolved).startswith(str(repo_resolved)):
-            return json.dumps({"error": "Path is outside the ETL repository"})
-    except Exception:
-        return json.dumps({"error": "Invalid path"})
 
     try:
         content = full_path.read_text(encoding="utf-8", errors="replace")
@@ -135,46 +138,46 @@ def read_doc(path: str) -> str:
         return json.dumps({"error": f"Failed to read file: {str(e)}"})
 
     return json.dumps({
-        "file": str(os.path.relpath(full_path, str(repo))),
+        "file": f"{doc_root.name}/{os.path.relpath(full_path, str(doc_root))}",
         "content": content,
     })
 
 
 @mcp.tool()
 def list_docs(directory: str = "") -> str:
-    """List documentation files available in the ETL repo.
+    """List documentation files available in the configured doc directories.
 
     Args:
-        directory: Subdirectory to list (e.g., "Documentation/PCORNet_CDM+").
+        directory: Subdirectory to list (e.g., "PCORNet_CDM+").
                    Default: lists all documentation directories.
 
     Returns:
         JSON with list of documentation files.
     """
-    repo = _get_etl_repo()
+    doc_paths = _get_doc_paths()
 
     if directory:
-        target = repo / directory
-        if not target.is_dir():
-            return json.dumps({"error": f"Directory not found: {directory}"})
-        files = sorted(
-            str(f.relative_to(repo))
-            for f in target.rglob("*.md")
-        )
-        return json.dumps({
-            "directory": directory,
-            "file_count": len(files),
-            "files": files,
-        })
+        for doc_dir in doc_paths:
+            target = doc_dir / directory
+            if target.is_dir():
+                files = sorted(
+                    f"{doc_dir.name}/{f.relative_to(doc_dir)}"
+                    for f in target.rglob("*.md")
+                )
+                return json.dumps({
+                    "directory": directory,
+                    "file_count": len(files),
+                    "files": files,
+                })
+        return json.dumps({"error": f"Directory not found: {directory}"})
 
     all_files = {}
-    for doc_dir in _get_doc_paths():
-        rel_dir = str(doc_dir.relative_to(repo))
+    for doc_dir in doc_paths:
         files = sorted(
-            str(f.relative_to(repo))
+            f"{doc_dir.name}/{f.relative_to(doc_dir)}"
             for f in doc_dir.rglob("*.md")
         )
-        all_files[rel_dir] = files
+        all_files[str(doc_dir)] = files
 
     return json.dumps({
         "doc_directories": all_files,

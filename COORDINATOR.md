@@ -92,7 +92,8 @@ finishes OR until the bash tool times out (whichever comes first).
 |----------|-------------|
 | `$RESULTS_DIR` | Output directory, e.g. `results/2026-05-05_cdw_dqa` |
 | `$ETL_REPO` | Path to the ETL codebase, e.g. `/home/atth/gitlab/cdw` |
-| `$DB_CONFIG` | Path to the database YAML config |
+| `$DOC_PATHS` | JSON array of documentation directory paths |
+| `$CONFIG` | Path to the YAML config file |
 | `$MCP_CONFIG` | Path to `.mcp.json` |
 | `$MAX_TURNS` | Max turns per sub-agent (default: 50) |
 | `$WORKER_TOOLS` | Allowed tools for worker agents |

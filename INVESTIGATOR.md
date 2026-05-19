@@ -29,6 +29,7 @@ You receive from the coordinator:
    look like.
 
 4. **`$ETL_REPO`** — path to the ETL codebase (read-only).
+5. **`$DOC_PATHS`** — JSON array of documentation directory paths.
 
 ## Tools Available
 
