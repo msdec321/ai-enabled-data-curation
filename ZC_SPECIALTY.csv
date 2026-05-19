@@ -1,0 +1,243 @@
+﻿SPECIALTY_C,NAME,TITLE,ABBR,INTERNAL_ID
+1,Allergy,ALLERGY,Allergy,1
+10,Gastroenterology,GASTROENTEROLOGY,GI,10
+100,Pastoral Care,PASTORAL CARE,Pastoral,100
+101,Pediatric Anesthesia,PEDIATRIC ANESTHESIA,Peds Anes,101
+102,Pediatric Cardiothoracic Surgery,PEDIATRIC CARDIOTHORACIC SURGERY,Peds CT Surg,102
+103,Pediatric Critical Care Medicine,PEDIATRIC CRITICAL CARE MEDICINE,Peds CC,103
+104,Pediatric Dermatology,PEDIATRIC DERMATOLOGY,Peds Derm,104
+105,Pediatric Emergency Medicine,PEDIATRIC EMERGENCY MEDICINE,Peds EM,105
+106,Pediatric Endocrinology,PEDIATRIC ENDOCRINOLOGY,Peds Endo,106
+107,Pediatric Gastroenterology,PEDIATRIC GASTROENTEROLOGY,Peds GI,107
+108,Pediatric Genetics,PEDIATRIC GENETICS,Peds Genetic,108
+109,Pediatric Infectious Disease,PEDIATRIC INFECTIOUS DISEASE,Peds ID,109
+11,General Surgery,GENERAL SURGERY,Gen Surgery,11
+110,Pediatric Intensive Care,PEDIATRIC INTENSIVE CARE,Ped IC,110
+111,Pediatric Nephrology,PEDIATRIC NEPHROLOGY,Peds Nephro,111
+112,Pediatric Neurosurgery,PEDIATRIC NEUROSURGERY,Ped NeurSurg,112
+113,Pediatric Oncology,PEDIATRIC ONCOLOGY,Peds Onc,113
+114,Pediatric Ophthalmology,PEDIATRIC OPHTHALMOLOGY,Peds Ophth,114
+115,Pediatric Orthopaedic Surgery,PEDIATRIC ORTHOPAEDIC SURGERY,Peds Ortho,115
+116,Pediatric Otolaryngology,PEDIATRIC OTOLARYNGOLOGY,Peds ENT,116
+117,Pediatric Pulmonology,PEDIATRIC PULMONOLOGY,Peds Pulm,117
+118,Pediatric Radiology,PEDIATRIC RADIOLOGY,Peds Rads,118
+119,Pediatric Rehabilitation,PEDIATRIC REHABILITATION,Peds Rehab,119
+12,Gerontology,GERONTOLOGY,Gerontology,12
+120,Pediatric Rheumatology,PEDIATRIC RHEUMATOLOGY,Peds Rheum,120
+121,Pediatric Surgery,PEDIATRIC SURGERY,Peds Surg,121
+122,Pediatric Urology,PEDIATRIC UROLOGY,Peds Uro,122
+123,Perinatology,PERINATOLOGY,Perinatology,123
+124,Pharmacy,PHARMACY,Pharmacy,124
+126,Proctology,PROCTOLOGY,Proctology,126
+127,Prosthodontics,PROSTHODONTICS,Prosthodont,127
+128,Pulmonary Disease,PULMONARY DISEASE,Pulm,128
+129,Rehabilitation,REHABILITATION,Rehab,129
+13,Gynecology,GYNECOLOGY,Gynecology,13
+130,"Resource, Ancillary","RESOURCE, ANCILLARY","Resource, An",130
+131,Respiratory Therapy,RESPIRATORY THERAPY,Respiratory,131
+133,Speech Pathology,SPEECH PATHOLOGY,SP,133
+134,Sports Medicine,SPORTS MEDICINE,Sports Med,134
+135,Surgery,SURGERY,Surgery,135
+136,Transplant,TRANSPLANT,Transplant,136
+137,Trauma Surgery,TRAUMA SURGERY,Trauma Surg,137
+138,Urgent Care,URGENT CARE,Urgent Care,138
+139,Lactation Services,LACTATION SERVICES,Lactation,139
+14,Hematology,HEMATOLOGY,Hematology,14
+140,Dermatopathology,DERMATOPATHOLOGY,DermPath,140
+141,Allergy and Immunology,ALLERGY AND IMMUNOLOGY,Alg and Imm,141
+142,Aerospace Medicine,AEROSPACE MEDICINE,Aero Med,142
+143,Gynecologic Oncology,GYNECOLOGIC ONCOLOGY,Gyn Onc,143
+144,Palliative Medicine,PALLIATIVE MEDICINE,Palliative,144
+145,Maternal and Fetal Medicine,MATERNAL AND FETAL MEDICINE,MFM,145
+146,Medical Toxicology,MEDICAL TOXICOLOGY,Toxicology,146
+147,Pediatric Transplant Hepatology,PEDIATRIC TRANSPLANT HEPATOLOGY,Peds Txp Hep,147
+148,Reproductive Endocrinology and Infertility,REPRODUCTIVE ENDOCRINOLOGY AND INFERTILITY,REI,148
+149,Transplant Hepatology,TRANSPLANT HEPATOLOGY,Txp Hep,149
+15,Immunology,IMMUNOLOGY,Immunology,15
+150,Home Health Services,HOME HEALTH SERVICES,Home Health,150
+151,Breast Surgery,BREAST SURGERY,Breast Surg,151
+152,Travel Medicine,TRAVEL MEDICINE,Travel Med,152
+153,Wound Care,WOUND CARE,Wound,153
+154,Pediatric Hematology,PEDIATRIC HEMATOLOGY,Peds Hem,154
+155,Pediatric Plastic Surgery,PEDIATRIC PLASTIC SURGERY,Peds Plastic,155
+156,Pediatric Physical Medicine and Rehabilitation,PEDIATRIC PHYSICAL MEDICINE AND REHABILITATION,Peds PMR,156
+157,Retina Ophthalmology,RETINA OPHTHALMOLOGY,Retina Ophth,157
+158,Oculoplastics Ophthalmology,OCULOPLASTICS OPHTHALMOLOGY,Oculoplastic,158
+159,Neuro-Ophthalmology,NEURO-OPHTHALMOLOGY,Neuro-Ophtha,159
+16,Infectious Diseases,INFECTIOUS DISEASES,ID,16
+160,Contact Lens Optometry,CONTACT LENS OPTOMETRY,Contact Lens,160
+161,Cornea Ophthalmology,CORNEA OPHTHALMOLOGY,Cornea Ophth,161
+162,Glaucoma Ophthalmology,GLAUCOMA OPHTHALMOLOGY,Glaucoma Oph,162
+163,Hospice Services,HOSPICE SERVICES,Hospice Serv,163
+164,Pediatric Immunology,PEDIATRIC IMMUNOLOGY,Peds Immuno,164
+165,Spine Surgery,SPINE SURGERY,Spine Surg,165
+166,Endodontics,ENDODONTICS,Endodontics,166
+168,Urogynecology,UROGYNECOLOGY,Urogyn,168
+17,Internal Medicine,INTERNAL MEDICINE,IM,17
+170,Child Life,CHILD LIFE,Child Life,170
+171,Skilled Nursing Facility,SKILLED NURSING FACILITY,SNF,171
+172,Long Term Acute Care,LONG TERM ACUTE CARE,LTC,172
+173,Transplant Surgery,TRANSPLANT SURGERY,Txp Surg,173
+174,Finance,FINANCE,Finance,174
+175,Neuropsychology,NEUROPSYCHOLOGY,Neuropsych,175
+176,Electrophysiology,ELECTROPHYSIOLOGY,Electrophys,176
+177,Sleep Medicine,SLEEP MEDICINE,Sleep Med,177
+178,Acute Care Hospital,ACUTE CARE HOSPITAL,Acute Care,178
+179,Transitional Care Unit,TRANSITIONAL CARE UNIT,Transitional,179
+18,Nephrology,NEPHROLOGY,Nephrology,18
+180,Assisted Living Facility,ASSISTED LIVING FACILITY,Asst Living,180
+181,Group Home,GROUP HOME,Group Home,181
+182,Intensive Residential Treatment Services,INTENSIVE RESIDENTIAL TREATMENT SERVICES,IRTS,182
+183,Intermediate Care Facility,INTERMEDIATE CARE FACILITY,Intmd Care,183
+184,Dialysis Clinic,DIALYSIS CLINIC,Dialysis Cli,184
+185,DME Services,DME SERVICES,DME Services,185
+186,Elder Care Services,ELDER CARE SERVICES,Elder Care,186
+187,Family Nutrition Services,FAMILY NUTRITION SERVICES,Family Nutri,187
+188,Food Delivery Services,FOOD DELIVERY SERVICES,Food Deliver,188
+189,Home Dialysis,HOME DIALYSIS,Home Dialysi,189
+19,Neurology,NEUROLOGY,Neurology,19
+190,Home Infusion and Injection Services,HOME INFUSION AND INJECTION SERVICES,Home Inf Inj,190
+191,Home Hospice,HOME HOSPICE,Home Hospice,191
+192,Home Maintenance Services,HOME MAINTENANCE SERVICES,Home Maint,192
+193,Home Therapy Services,HOME THERAPY SERVICES,Home Therapy,193
+194,Infusion Clinic,INFUSION CLINIC,Infusion Cli,194
+195,In-Home Clinical Assessments,IN-HOME CLINICAL ASSESSMENTS,Home Assess,195
+196,In-Home Lab Specimen Collection,IN-HOME LAB SPECIMEN COLLECTION,Home Lab,196
+197,Inpatient Hospice,INPATIENT HOSPICE,IP Hospice,197
+198,"Lines, Drains and Airways Services","LINES, DRAINS AND AIRWAYS SERVICES",LDA Services,198
+199,Personal Care Services,PERSONAL CARE SERVICES,Pers Care,199
+2,Anesthesiology,ANESTHESIOLOGY,Anes,2
+20,Neurosurgery,NEUROSURGERY,Neurosurgery,20
+200,Respite Care,RESPITE CARE,Respite Care,200
+201,Ventilator Services,VENTILATOR SERVICES,Vent Service,201
+202,Dialysis,DIALYSIS,Dialysis,202
+203,Tube Feeding,TUBE FEEDING,Tube Feeding,203
+204,Pediatric Social Services,PEDIATRIC SOCIAL SERVICES,Ped Soc Serv,204
+205,Infusion Therapy,INFUSION THERAPY,Infusion,205
+206,Neurocritical Care,NEUROCRITICAL CARE,Neurocritica,206
+207,Assistant Behavior Analyst,ASSISTANT BEHAVIOR ANALYST,Behav Analys,207
+208,Behavior Technician,BEHAVIOR TECHNICIAN,Behavior Tec,208
+209,Thoracic Surgery,THORACIC SURGERY,Thoracic Sur,209
+21,Nutrition,NUTRITION,Nutrition,21
+210,Financial Counseling and Assistance Services,FINANCIAL COUNSELING AND ASSISTANCE SERVICES,Fin Asst,210
+211,Employment Assistance Services,EMPLOYMENT ASSISTANCE SERVICES,Employment,211
+212,Education and Literacy Services,EDUCATION AND LITERACY SERVICES,Edu Lit,212
+213,Language and Communication Assistance Services,LANGUAGE AND COMMUNICATION ASSISTANCE SERVICES,Lang & Comm,213
+214,Disability Services,DISABILITY SERVICES,Disability,214
+215,Childcare Services,CHILDCARE SERVICES,Childcare,215
+216,Youth Community Services,YOUTH COMMUNITY SERVICES,Youth Svcs,216
+217,Social and Spiritual Support,SOCIAL AND SPIRITUAL SUPPORT,Social Sppt,217
+218,Home Living Aide Services,HOME LIVING AIDE SERVICES,Living Aide,218
+219,Food Pantry and Kitchen,FOOD PANTRY AND KITCHEN,Food Pantry,219
+22,Obstetrics and Gynecology,OBSTETRICS AND GYNECOLOGY,OBGYN,22
+220,Addiction Support Services,ADDICTION SUPPORT SERVICES,Addct Sppt,220
+221,Domestic Abuse Support Services,DOMESTIC ABUSE SUPPORT SERVICES,Dom Abuse,221
+222,Post-Trauma Therapy and Support,POST-TRAUMA THERAPY AND SUPPORT,Post-Trauma,222
+223,Memory Care,MEMORY CARE,Memory Care,223
+224,Long Term Care Facility,LONG TERM CARE FACILITY,LTC Facility,224
+225,Non-Medical Transportation Services,NON-MEDICAL TRANSPORTATION SERVICES,Non-Med Xpt,225
+226,Medical Transportation Services,MEDICAL TRANSPORTATION SERVICES,MedTransport,226
+227,Case Management,CASE MANAGEMENT,Case Mgmt,227
+228,Inpatient Rehabilitation Facility,INPATIENT REHABILITATION FACILITY,IRF,228
+229,Outpatient Rehabilitation Clinic,OUTPATIENT REHABILITATION CLINIC,OP Rehab,229
+23,Obstetrics,OBSTETRICS,Obstetrics,23
+230,Advanced Heart Failure and Transplant Cardiology,ADVANCED HEART FAILURE AND TRANSPLANT CARDIOLOGY,Adv Heart Fa,230
+231,Hematopoietic Cell Transplantation and Cellular Therapy,HEMATOPOIETIC CELL TRANSPLANTATION AND CELLULAR THERAPY,Cell Transp,231
+232,Obesity Medicine,OBESITY MEDICINE,Obesity Med,232
+233,Ambulatory Care,AMBULATORY CARE,Amb Care,233
+234,Hepatology,HEPATOLOGY,Hepatology,234
+235,Pediatric Transplant Nephrology,PEDIATRIC TRANSPLANT NEPHROLOGY,Ped TXP Neph,235
+236,Transplant Nephrology,TRANSPLANT NEPHROLOGY,TXP Neph,236
+237,Geriatric Psychiatry,GERIATRIC PSYCHIATRY,Geri Psych,237
+238,Peripheral Vascular Disease,PERIPHERAL VASCULAR DISEASE,Vasc Dis,238
+239,Maxillofacial Surgery,MAXILLOFACIAL SURGERY,Maxillo Surg,239
+24,Oncology,ONCOLOGY,Oncology,24
+240,Interventional Cardiology,INTERVENTIONAL CARDIOLOGY,Int Card,240
+241,Dentist,DENTIST,Dentist,241
+242,Undersea and Hyperbaric Medicine,UNDERSEA AND HYPERBARIC MEDICINE,Hyperbaric,242
+25,Ophthalmology,OPHTHALMOLOGY,Ophth,25
+256,Hospitalist,HOSPITALIST,Hospitalist,256
+26,Optometry,OPTOMETRY,Optometry,26
+27,Orthopaedic Surgery,ORTHOPAEDIC SURGERY,Orthopedics,27
+28,Pediatric Allergy,PEDIATRIC ALLERGY,Peds Allergy,28
+29,Pediatric Cardiology,PEDIATRIC CARDIOLOGY,Peds Cards,29
+3,Audiology,AUDIOLOGY,Audiology,3
+30,Pediatric Hematology and Oncology,PEDIATRIC HEMATOLOGY AND ONCOLOGY,Peds Hem Onc,30
+31,Pediatric Neurology,PEDIATRIC NEUROLOGY,Peds Neuro,31
+32,Pediatrics,PEDIATRICS,Pediatrics,32
+33,Physical Medicine and Rehabilitation,PHYSICAL MEDICINE AND REHABILITATION,PM&R,33
+34,Physical Therapy,PHYSICAL THERAPY,PT,34
+35,Plastic Surgery,PLASTIC SURGERY,Plastic Surg,35
+36,Podiatry,PODIATRY,Podiatry,36
+37,Psychiatry,PSYCHIATRY,Psychiatry,37
+38,Psychology,PSYCHOLOGY,Psychology,38
+39,Radiation Oncology,RADIATION ONCOLOGY,Rad Onc,39
+4,Cardiology,CARDIOLOGY,Cardiology,4
+40,Radiology,RADIOLOGY,Radiology,40
+41,Rheumatology,RHEUMATOLOGY,Rheumatology,41
+42,Thoracic Diseases,THORACIC DISEASES,Thoracic,42
+43,Urology,UROLOGY,Urology,43
+44,Vascular Surgery,VASCULAR SURGERY,Vasc Surg,44
+45,Addiction Medicine,ADDICTION MEDICINE,Addiction,45
+46,Cardiothoracic Surgery,CARDIOTHORACIC SURGERY,Cardiac Surg,46
+47,Chiropractic Medicine,CHIROPRACTIC MEDICINE,Chiropractic,47
+48,Diagnostic Radiology,DIAGNOSTIC RADIOLOGY,Diag Rad,48
+49,Emergency Medicine,EMERGENCY MEDICINE,EM,49
+5,Colon and Rectal Surgery,COLON AND RECTAL SURGERY,Colon Surg,5
+50,General Practice,GENERAL PRACTICE,GP,50
+5000,Community Health Work,COMMUNITY HEALTH WORK,Community He,5000
+5001,Health Education,HEALTH EDUCATION,Health Educa,5001
+5002,Care Management,CARE MANAGEMENT,Care Managem,5002
+5003,Diabetes Education,DIABETES EDUCATION,Diabetes Edu,5003
+5004,Medication Management Services,MEDICATION MANAGEMENT SERVICES,Medication M,5004
+5005,Behavioral Specialist,BEHAVIORAL SPECIALIST,Behavioral S,5005
+5006,Neuro-Oncology,NEURO-ONCOLOGY,Neuro-Oncolo,5006
+5007,Clinical Genetics and Genomics,CLINICAL GENETICS AND GENOMICS,Clinical Gen,5007
+5008,Lymphedema,LYMPHEDEMA,Lymphedema,5008
+5010,Orthodontist,ORTHODONTIST,Orthodontist,5010
+51,Medical Oncology,MEDICAL ONCOLOGY,Med Onc,51
+52,Nuclear Medicine,NUCLEAR MEDICINE,Nuclear Med,52
+54,Oral Surgery,ORAL SURGERY,Oral Surgery,54
+55,Pathology,PATHOLOGY,Pathology,55
+56,Peripheral Vascular Disease,PERIPHERAL VASCULAR DISEASE,Peripheral V,56
+57,Preventative Medicine,PREVENTATIVE MEDICINE,Preventative,57
+58,Radiation Therapy,RADIATION THERAPY,Rad Therapy,58
+59,Surgical Oncology,SURGICAL ONCOLOGY,Surg Onc,59
+6,Dermatology,DERMATOLOGY,Derm,6
+60,Certified Clinical Nurse Specialist,CERTIFIED CLINICAL NURSE SPECIALIST,CCNS,60
+61,Midwifery,MIDWIFERY,Midwifery,61
+62,Certified Registered Nurse Anesthetist,CERTIFIED REGISTERED NURSE ANESTHETIST,CRNA,62
+63,Social Services,SOCIAL SERVICES,Social Serv,63
+64,Nurse Practitioner,NURSE PRACTITIONER,NP,64
+65,Physician Assistant,PHYSICIAN ASSISTANT,PA,65
+66,Occupational Therapy,OCCUPATIONAL THERAPY,OT,66
+67,Dental General Practice,DENTAL GENERAL PRACTICE,Dental GP,67
+68,Orthodontics,ORTHODONTICS,Orthodontics,68
+69,Pedodontics,PEDODONTICS,Pedodontics,69
+7,Endocrinology,ENDOCRINOLOGY,Endo,7
+70,Periodontics,PERIODONTICS,Periodontics,70
+71,Joint Surgery,JOINT SURGERY,Joint Surg,71
+72,Adolescent Medicine,ADOLESCENT MEDICINE,Adolescent,72
+73,Alternative Medicine,ALTERNATIVE MEDICINE,Alternative,73
+74,Bariatrics,BARIATRICS,Bariatrics,74
+75,Behavioral Health,BEHAVIORAL HEALTH,Behavioral,75
+77,Burn Surgery,BURN SURGERY,Burns,77
+78,Cardiac Rehabilitation,CARDIAC REHABILITATION,Cards Rehab,78
+79,Child and Adolescent Psychiatry,CHILD AND ADOLESCENT PSYCHIATRY,Child Psych,79
+8,Otolaryngology,OTOLARYNGOLOGY,ENT,8
+81,Interventional Radiology,INTERVENTIONAL RADIOLOGY,IR,81
+82,Dietitian,DIETITIAN,Dietitian,82
+83,Genetics,GENETICS,Genetics,83
+84,Geriatric Medicine,GERIATRIC MEDICINE,Geri Med,84
+85,Hand Surgery,HAND SURGERY,Hand Surgery,85
+86,Hematology and Oncology,HEMATOLOGY AND ONCOLOGY,Hem Onc,86
+88,Intensive Care,INTENSIVE CARE,ICU,88
+89,Lab,LAB,Lab,89
+9,Family Medicine,FAMILY MEDICINE,FM,9
+90,Medical Genetics,MEDICAL GENETICS,Med Genetics,90
+92,Neonatology,NEONATOLOGY,Neonatology,92
+95,Occupational Medicine,OCCUPATIONAL MEDICINE,Occ Med,95
+96,Orthotics,ORTHOTICS,Orthotics,96
+97,Osteopathic Medicine,OSTEOPATHIC MEDICINE,Osteopathic,97
+98,Pain Medicine,PAIN MEDICINE,Pain Med,98
+99,Unknown Physician Specialty,UNKNOWN PHYSICIAN SPECIALTY,Unknown Phys,99
