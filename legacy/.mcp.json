@@ -1,22 +1,22 @@
 {
   "mcpServers": {
     "sql_executor": {
-      "command": ".venv/bin/python",
+      "command": "../.venv/bin/python",
       "args": ["tools/sql_executor_server.py"],
       "env": {}
     },
     "etl_reader": {
-      "command": ".venv/bin/python",
+      "command": "../.venv/bin/python",
       "args": ["tools/etl_reader_server.py"],
       "env": {}
     },
     "spec_query": {
-      "command": ".venv/bin/python",
+      "command": "../.venv/bin/python",
       "args": ["tools/spec_query_server.py"],
       "env": {}
     },
     "doc_search": {
-      "command": ".venv/bin/python",
+      "command": "../.venv/bin/python",
       "args": ["tools/doc_search_server.py"],
       "env": {}
     }

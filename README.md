@@ -44,6 +44,7 @@ Trust boundaries:
 | `docs/` | Project Mermaid security proposal, provider evaluations, PHI data-flow inventory |
 | `config.yaml` | DB connection, ETL repo path, documentation paths, tables to assess |
 | `agent.ipynb` | Earlier scratch notebook (superseded by `autodqa_agent.ipynb`) |
+| `legacy/` | The deprecated Claude Code multi-agent pipeline (see below) |
 
 ## Prerequisites
 
@@ -162,10 +163,10 @@ The PoC is **Tier-0/1 by design: synthetic data only**. Do not point it at real 
 
 ## Legacy: Claude Code pipeline (deprecated)
 
-The original AutoDQA implementation was a multi-agent pipeline built on Claude Code headless mode (`claude -p`): a coordinator agent orchestrated profiler, analyst, investigator, reviewer, and report-writer sub-agents through seven phases, communicating via JSON files and reaching the CDW through MCP tool servers. It has been superseded by the code-mode agent above, but remains runnable:
+The original AutoDQA implementation was a multi-agent pipeline built on Claude Code headless mode (`claude -p`): a coordinator agent orchestrated profiler, analyst, investigator, reviewer, and report-writer sub-agents through seven phases, communicating via JSON files and reaching the CDW through MCP tool servers. It has been superseded by the code-mode agent above and now lives in [`legacy/`](legacy/README.md), but remains runnable from the repo root:
 
 ```bash
-./run.sh --config config.yaml
+./legacy/run.sh --config config.yaml
 ```
 
-Its pieces are still in the repo: `run.sh` (launcher), the role instruction files (`COORDINATOR.md`, `PROFILER.md`, `ANALYST.md`, `INVESTIGATOR.md`, `REVIEW.md`, `REPORT_WRITER.md`), the MCP servers in `tools/`, and the full design in [`docs/architecture.md`](docs/architecture.md). Output from a pipeline run lands in `results/<YYYY-MM-DD>_<db_id>_dqa/`.
+Its pieces: `legacy/run.sh` (launcher), the role instruction files (`legacy/COORDINATOR.md`, `PROFILER.md`, `ANALYST.md`, `INVESTIGATOR.md`, `REVIEW.md`, `REPORT_WRITER.md`), the MCP servers in `legacy/tools/`, and the full design in [`docs/architecture.md`](docs/architecture.md). Output from a pipeline run lands in `legacy/results/<YYYY-MM-DD>_<db_id>_dqa/`.
