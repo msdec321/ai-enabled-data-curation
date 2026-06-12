@@ -1,50 +1,50 @@
 # AutoDQA — Autonomous Data Quality Assessment
 
-A multi-agent system that autonomously profiles a clinical data warehouse (CDW), detects data quality issues, traces them through ETL code to identify root causes, and produces an actionable report.
+An agent for autonomous data quality assessment of a clinical data warehouse (CDW): it profiles tables, detects data quality issues, and traces them through ETL code to root causes. Targets PCORnet CDM databases on SQL Server.
 
-Built on [Claude Code](https://docs.anthropic.com/en/docs/claude-code) headless mode (`claude -p`). Targets PCORnet CDM databases on SQL Server.
+The design is **code-mode**: the agent reasons by writing code, and all model-authored code runs in an isolated sandbox rather than on the orchestrating host.
+
+- **Reasoning** — Claude on **Amazon Bedrock** (`ChatBedrockConverse`), optionally routed through a Cloudflare AI Gateway
+- **Orchestration** — **LangGraph** (`create_react_agent`): a trusted local loop that holds no DB credentials and runs no model-written code
+- **Execution** — a **Cloudflare Sandbox** container that runs the agent's Python in isolation
 
 ## Architecture
 
-A **coordinator agent** orchestrates a team of specialist sub-agents through seven phases:
+The agent loop, from [`docs/target_architecture.md`](docs/target_architecture.md):
 
-| Phase | Agent | Output |
-|-------|-------|--------|
-| 0 — Context Ingestion | Coordinator | `etl_index.json`, `expectations.json` |
-| 1 — Profiling | Profiler | `profile_<TABLE>.json` per table |
-| 2 — Issue Detection | Analyst | `issues.json` |
-| 3 — Issue Clustering | Coordinator | `clusters.json` |
-| 4 — Root Cause Investigation | Investigator | `investigation_cluster_<ID>.json` per cluster |
-| 5 — Review | Reviewer | `review.json` |
-| 6 — Reporting | Report Writer | `dqa_report.md` |
+1. The orchestrator sends the conversation to Bedrock.
+2. Bedrock replies — either "run this Python" or a final answer.
+3. The orchestrator ships the agent-written code to the sandbox over HTTPS.
+4. The code queries the CDW read-only and reads the ETL repo.
+5. Results return to the orchestrator, which appends them and loops until Bedrock produces a final answer.
 
-Each sub-agent is an independent `claude -p` session that communicates only through JSON files on disk. The coordinator never runs queries itself — it orchestrates, clusters issues, and makes priority decisions.
+Trust boundaries:
 
-### Agent Roles
+- **Orchestrator = trusted** — no model-authored code, no DB credentials.
+- **Sandbox = untrusted** — all model-written code is contained in a Firecracker microVM, with egress allowlisted.
+- **Read-only is enforced at the DB login** (`db_datareader`), not by keyword filtering — once the agent writes arbitrary code, only the grant level guarantees read-only.
 
-- **Profiler** — Runs statistical SQL queries (null rates, cardinality, distributions, FK orphan counts) and writes structured JSON profiles
-- **Analyst** — Compares profiles against PCORnet column specifications to flag severity-graded data quality issues
-- **Investigator** — Reads ETL SQL (source views, load procs, mapping functions) to identify the root cause of each issue cluster
-- **Reviewer** — Independently spot-checks queries and ETL code citations to verify accuracy before reporting
-- **Report Writer** — Synthesizes all findings into a human-readable markdown report
+**Current vs. target state:** the notebook today runs the DB query (`query_cdw`) and ETL tools (`search_etl`, `read_etl_file`) locally, and uses the sandbox for compute (`run_python`). The target moves the DB connection and ETL repo *inside* an in-network sandbox image — see the prerequisites note in [`docs/target_architecture.md`](docs/target_architecture.md).
 
-### MCP Tool Servers
+## Repository layout
 
-Four MCP servers (in `tools/`) give agents access to external data:
-
-| Server | Purpose |
-|--------|---------|
-| `sql_executor` | Read-only T-SQL execution against the CDW (10k row limit, keyword blocklist enforced) |
-| `etl_reader` | Search and read files in the ETL codebase |
-| `spec_query` | Query PCORnet metadata tables for column specs, value sets, and constraints |
-| `doc_search` | Search and read ETL documentation |
+| Path | What it is |
+|------|------------|
+| `autodqa_agent.ipynb` | The main agent — Bedrock + LangGraph loop with `query_cdw`, `search_etl`/`read_etl_file`, and `run_python` tools |
+| `sandbox-worker/` | `dqa-sandbox-runner` — Cloudflare Worker that executes untrusted code in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container |
+| `orchestrator-worker/` | Cloudflare-hosted PoC: the notebook loop re-hosted as a Worker behind Cloudflare Access, with a chat UI, synthetic PCORnet CDM in D1, and synthetic ETL files in KV |
+| `docs/target_architecture.md` | The code-mode architecture (diagram + trust model) |
+| `docs/` | Project Mermaid security proposal, provider evaluations, PHI data-flow inventory |
+| `config.yaml` | DB connection, ETL repo path, documentation paths, tables to assess |
+| `agent.ipynb` | Earlier scratch notebook (superseded by `autodqa_agent.ipynb`) |
 
 ## Prerequisites
 
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
 - Python 3.11+
-- ODBC Driver 18 for SQL Server
-- `ANTHROPIC_API_KEY` environment variable set
+- ODBC Driver 18 for SQL Server (for the local `query_cdw` tool)
+- An Amazon Bedrock API key (bearer token) with access to Claude models
+- A Cloudflare account on the Workers Paid plan (Containers), for the sandbox worker
+- Node.js + `wrangler` (for deploying the Workers)
 
 ## Setup
 
@@ -54,7 +54,7 @@ Four MCP servers (in `tools/`) give agents access to external data:
 git clone <repo-url>
 cd ai-enabled-data-curation
 python3 -m venv .venv
-.venv/bin/pip install mcp[cli] pyodbc pyyaml
+.venv/bin/pip install "langchain-aws>=1.4.5" "langgraph>=0.6" "langchain-core>=0.3" "boto3>=1.35.87" pyodbc pyyaml requests jupyter
 ```
 
 ### 2. Install ODBC Driver 18 (Ubuntu/Debian)
@@ -67,7 +67,18 @@ echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://
 sudo apt update && sudo ACCEPT_EULA=Y apt install -y msodbcsql18
 ```
 
-### 3. Configure the project
+### 3. Deploy the sandbox worker
+
+```bash
+cd sandbox-worker
+npm install
+npx wrangler secret put SANDBOX_SHARED_SECRET   # any strong shared value
+npm run deploy
+```
+
+Copy the printed `*.workers.dev` URL — it goes in `.env` below. See [`sandbox-worker/README.md`](sandbox-worker/README.md) for details (no local Docker needed; it deploys Cloudflare's pre-built `sandbox:*-python` image).
+
+### 4. Configure the database and ETL sources
 
 ```bash
 cp config.example.yaml config.yaml
@@ -95,7 +106,6 @@ sources:
   documentation:
     paths:
       - "<PATH_TO_ETL_REPO>/Documentation"
-      - "<PATH_TO_ETL_REPO>/docs"
 
 tables:
   - DEMOGRAPHIC
@@ -104,50 +114,51 @@ tables:
 ```
 
 **Notes:**
-- For Windows Authentication, replace `uid`/`pwd` with `trusted_connection: "yes"`
-- If connecting from WSL2 to a local SQL Server, use `127.0.0.1` as the server (WSL2 mirrored networking) or the Windows host IP from `cat /etc/resolv.conf`
-- `sources.etl.path` should point to the local path of your ETL codebase
-- `sources.documentation.paths` lists directories containing markdown documentation — these can be inside or outside the ETL repo
-- `tables` lists the CDM tables to assess
+- Use a **read-only** DB login (`db_datareader`, no write/DDL).
+- For Windows Authentication, replace `uid`/`pwd` with `trusted_connection: "yes"`.
+- If connecting from WSL2 to a local SQL Server, use `127.0.0.1` (mirrored networking) or the Windows host IP from `cat /etc/resolv.conf`.
+
+### 5. Create `.env` (gitignored)
+
+```bash
+# Bedrock
+AWS_BEARER_TOKEN_BEDROCK=<bedrock-api-key>
+export AWS_DEFAULT_REGION=us-east-1
+
+# Sandbox worker (from step 3)
+SANDBOX_WORKER_URL=https://dqa-sandbox-runner.<account>.workers.dev
+SANDBOX_SHARED_SECRET=<same value as the worker secret>
+
+# Optional — route Bedrock through a Cloudflare AI Gateway
+CF_ACCOUNT_ID=<account-id>
+CF_AIG_GATEWAY=<gateway-name>
+CF_AIG_TOKEN=<gateway-token>
+```
+
+The AI Gateway path is toggled by `USE_AI_GATEWAY` in the notebook.
 
 ## Usage
 
-### Full DQA pipeline
+Run the agent from the notebook:
+
+```bash
+./.venv/bin/jupyter lab autodqa_agent.ipynb
+```
+
+Execute the cells top to bottom, then set `task` in the final cells and re-run. The agent streams each reason → act → observe step, so you can watch the tool calls and results as it works.
+
+### Hosted PoC (synthetic data)
+
+`orchestrator-worker/` is the same loop deployed entirely on Cloudflare — chat UI behind Cloudflare Access, synthetic PCORnet CDM in D1, synthetic ETL codebase in KV, and four deterministically planted data-quality issues to find. See [`orchestrator-worker/README.md`](orchestrator-worker/README.md) for setup and the security posture.
+
+The PoC is **Tier-0/1 by design: synthetic data only**. Do not point it at real CDW data — that requires the Project Mermaid Tier 2+ controls (DLP, redacted logs, BAA-covered services).
+
+## Legacy: Claude Code pipeline (deprecated)
+
+The original AutoDQA implementation was a multi-agent pipeline built on Claude Code headless mode (`claude -p`): a coordinator agent orchestrated profiler, analyst, investigator, reviewer, and report-writer sub-agents through seven phases, communicating via JSON files and reaching the CDW through MCP tool servers. It has been superseded by the code-mode agent above, but remains runnable:
 
 ```bash
 ./run.sh --config config.yaml
 ```
 
-### Custom task
-
-Bypass the full pipeline and give the agent a specific task:
-
-```bash
-./run.sh --config config.yaml --task "Query the DEMOGRAPHIC table and tell me how many rows there are"
-```
-
-### Options
-
-| Flag | Description |
-|------|-------------|
-| `--config <path>` | Path to YAML config file (required) |
-| `--tables <list>` | Comma-separated tables to profile (default: from config) |
-| `--task "<prompt>"` | Custom task instead of full DQA pipeline |
-| `--resume-from-analysis` | Skip profiling, start from issue detection |
-| `--resume-from-investigation` | Skip to root cause investigation |
-| `--resume-from-report` | Skip to report generation |
-| `<number>` | Max turns per sub-agent (default: 50) |
-
-### Resume from a checkpoint
-
-If a run is interrupted, resume from the last completed phase:
-
-```bash
-./run.sh --config config.yaml --resume-from-analysis
-./run.sh --config config.yaml --resume-from-investigation
-./run.sh --config config.yaml --resume-from-report
-```
-
-### Output
-
-All artifacts are written to `results/<YYYY-MM-DD>_<db_id>_dqa/`. The final deliverable is `dqa_report.md`.
+Its pieces are still in the repo: `run.sh` (launcher), the role instruction files (`COORDINATOR.md`, `PROFILER.md`, `ANALYST.md`, `INVESTIGATOR.md`, `REVIEW.md`, `REPORT_WRITER.md`), the MCP servers in `tools/`, and the full design in [`docs/architecture.md`](docs/architecture.md). Output from a pipeline run lands in `results/<YYYY-MM-DD>_<db_id>_dqa/`.

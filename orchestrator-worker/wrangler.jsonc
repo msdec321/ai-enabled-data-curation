@@ -1,0 +1,45 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "autodqa-orchestrator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "observability": { "enabled": true },
+
+  // Non-secret config. Secrets (CF_AIG_TOKEN, SANDBOX_SHARED_SECRET) are set
+  // via `wrangler secret bulk` — see README.
+  "vars": {
+    // Account + AI Gateway used for Bedrock (BYOK — the gateway signs with
+    // stored IAM keys; the Worker only sends cf-aig-authorization).
+    "CF_ACCOUNT_ID": "ccfb16c028dc5731cab073bdf569d8de",
+    "CF_AIG_GATEWAY": "data-curation-gateway",
+    "AWS_REGION": "us-east-1",
+    "MODEL_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    // Filled in AFTER enabling Cloudflare Access on the workers.dev domain
+    // (dashboard step). Both empty = Access JWT validation not enforced and
+    // the UI shows a "demo mode" warning banner.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  },
+
+  // Synthetic PCORnet CDM (Tier-1 data) standing in for the real CDW.
+  "d1_databases": [
+    {
+      "binding": "CDW",
+      "database_name": "autodqa-synthetic-cdw",
+      "database_id": "9beb3cab-fabf-49d0-82c3-7294691180f2"
+    }
+  ],
+
+  // Synthetic ETL codebase (the diagram's Documentation Store).
+  // KV instead of R2 because R2 isn't activated on this account; swap to an
+  // r2_buckets binding later if desired — src/index.ts isolates the access.
+  "kv_namespaces": [
+    { "binding": "ETL", "id": "8287a28c36904161a53c3942d5542310" }
+  ],
+
+  // Private worker-to-worker call to the sandbox runner — never traverses
+  // the public internet, unlike the notebook's HTTPS call.
+  "services": [
+    { "binding": "SANDBOX", "service": "dqa-sandbox-runner" }
+  ]
+}

@@ -37,7 +37,12 @@ if ! command -v claude &>/dev/null; then
   exit 1
 fi
 
-if ! python3 -c "import mcp, pyodbc, yaml" 2>/dev/null; then
+PYTHON="${SCRIPT_DIR}/.venv/bin/python3"
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="$(command -v python3)"
+fi
+
+if ! "$PYTHON" -c "import mcp, pyodbc, yaml" 2>/dev/null; then
   echo "Error: MCP server dependencies missing." >&2
   echo "Set up the venv with:" >&2
   echo "  python3 -m venv .venv && .venv/bin/pip install mcp[cli] pyodbc pyyaml" >&2
