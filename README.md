@@ -10,7 +10,7 @@ The design is **code-mode**: the agent reasons by writing code, and all model-au
 
 ## Architecture
 
-<img src="docs/autodqa_architecture.svg" alt="AutoDQA architecture" width="480">
+<img src="docs/autodqa_architecture.svg" alt="AutoDQA architecture" width="700">
 
 The agent loop:
 
