@@ -10,13 +10,20 @@ The design is **code-mode**: the agent reasons by writing code, and all model-au
 
 ## Architecture
 
-The agent loop, from [`docs/target_architecture.md`](docs/target_architecture.md):
+![AutoDQA architecture](docs/autodqa_architecture.svg)
 
-1. The orchestrator sends the conversation to Bedrock.
-2. Bedrock replies — either "run this Python" or a final answer.
-3. The orchestrator ships the agent-written code to the sandbox over HTTPS.
-4. The code queries the CDW read-only and reads the ETL repo.
-5. Results return to the orchestrator, which appends them and loops until Bedrock produces a final answer.
+The agent loop:
+
+1. The user submits a task through the Zero Trust front door (SSO/MFA); the LangGraph orchestrator sends the conversation context to Bedrock via the Cloudflare AI Gateway (access policies, audit logging, DLP).
+2. Bedrock replies — either "run this code" or a final answer.
+3. The orchestrator passes the execution request to the MCP Broker.
+4. The broker enforces tool and dataset allowlists (consulting the dataset registry), retrieves credentials from Keeper, and dispatches the code to the Cloudflare sandbox with credentials injected.
+5. The sandbox code queries the CDW with read-only T-SQL and reads the documentation store (ETL code, docs).
+6. Result rows are pulled back into the sandbox for analysis.
+7. stdout/results return through the broker.
+8. The orchestrator appends the results and loops back to (1) until Bedrock produces a final answer.
+
+See [`docs/target_architecture.md`](docs/target_architecture.md) for the trust model in detail.
 
 Trust boundaries:
 
