@@ -6,12 +6,13 @@ backend today; the interface is deliberately tiny so a different backend
 (Cloudflare Secrets Store, Keeper KSM) is a single new class. See the
 secrets-vault-ksm-unavailable note in project memory for why it isn't Keeper.
 
-A secret reference is an opaque dict from the registry, e.g.:
+A secret reference is an opaque dict, e.g.:
     {"vault": "aws_sm", "id": "<secret name or ARN>", "key": "shared_secret"}
 `key` is optional: present means the stored secret is JSON and we return that
-field; absent means return the raw secret string.
+field; absent means return the raw secret string (the caller may json.loads it).
 """
 import json
+import os
 
 import boto3
 
@@ -35,3 +36,14 @@ class AwsSecretsManagerVault:
             raise ValueError(f"secret {ref['id']} has no SecretString")
         key = ref.get("key")
         return raw if key is None else json.loads(raw)[key]
+
+
+_DEFAULT = None
+
+
+def default() -> AwsSecretsManagerVault:
+    """Process-wide vault, reused across warm Lambda invocations."""
+    global _DEFAULT
+    if _DEFAULT is None:
+        _DEFAULT = AwsSecretsManagerVault(os.environ.get("AWS_REGION", "us-east-1"))
+    return _DEFAULT

@@ -1,7 +1,13 @@
-import { getSandbox, type Sandbox } from "@cloudflare/sandbox";
+import { getSandbox, Sandbox as BaseSandbox } from "@cloudflare/sandbox";
 
-// Re-export the Sandbox Durable Object class so the runtime can instantiate it.
-export { Sandbox } from "@cloudflare/sandbox";
+// Subclass so we can set a sleep-after default. Containers are meant to be
+// ephemeral-per-run: the broker passes a unique session id per agent run and
+// destroys it when the run ends. `sleepAfter` is belt-and-suspenders — a
+// container that somehow escapes explicit destroy still goes idle quickly
+// instead of staying warm indefinitely.
+export class Sandbox extends BaseSandbox {
+  sleepAfter = "3m";
+}
 
 type Env = {
   Sandbox: DurableObjectNamespace<Sandbox>;
@@ -9,9 +15,14 @@ type Env = {
 };
 
 type RunRequest = {
-  code: string;
+  // "run" (default) executes code; "destroy" tears the container down.
+  action?: "run" | "destroy";
+  code?: string;
   language?: "python" | "javascript" | "typescript";
   session?: string;
+  // Environment variables to expose to the run (e.g. a DB login the broker
+  // injects). Kept out of `code` so secrets don't sit in the code body.
+  env?: Record<string, string>;
 };
 
 export default {
@@ -32,19 +43,43 @@ export default {
       return Response.json({ error: "invalid JSON body" }, { status: 400 });
     }
 
-    const { code, language = "python", session = "notebook" } = body;
+    const { action = "run", language = "python", session = "notebook", env: envVars } = body;
+
+    // `session` IS the isolation boundary: the same name routes to the same
+    // container. The broker passes one unique id per agent run, so each run
+    // gets its own container.
+    const sandbox = getSandbox(env.Sandbox, session);
+
+    // ── Teardown: destroy this run's container ──
+    if (action === "destroy") {
+      try {
+        await sandbox.destroy();
+        return Response.json({ destroyed: true, session });
+      } catch (e: any) {
+        console.error("sandbox destroy failed:", e?.stack ?? e);
+        return Response.json({ destroyed: false, session, error: String(e?.message ?? e) });
+      }
+    }
+
+    // ── Run code ──
+    const code = body.code;
     if (!code) {
       return Response.json({ error: "missing 'code'" }, { status: 400 });
     }
 
-    // `session` IS the isolation boundary: the same name routes to the same
-    // container. Today it's a constant ("notebook"); when this is wired into
-    // the LangGraph DQA pipeline, pass the run's thread_id for one sandbox
-    // per run.
-    const sandbox = getSandbox(env.Sandbox, session);
+    // Inject env vars via a prelude that sets os.environ, rather than relying on
+    // the code-interpreter kernel inheriting them. Values are JSON-encoded into
+    // a Python string literal (double-stringify), so this is injection-safe.
+    let toRun = code;
+    if (envVars && Object.keys(envVars).length > 0 && language === "python") {
+      const prelude =
+        `import os, json as _json\n` +
+        `os.environ.update(_json.loads(${JSON.stringify(JSON.stringify(envVars))}))\n`;
+      toRun = prelude + code;
+    }
 
     try {
-      const result = await sandbox.runCode(code, { language });
+      const result = await sandbox.runCode(toRun, { language });
       return Response.json({
         stdout: result.logs.stdout.join("\n"),
         stderr: result.logs.stderr.join("\n"),

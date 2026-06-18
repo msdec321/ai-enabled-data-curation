@@ -71,6 +71,18 @@ async def main() -> None:
                 elif not (isinstance(out, str) and out.strip() == "42"):
                     failure = f"expected sandbox output '42', got {text!r}"
 
+            # Non-fatal probe: query_cdw needs the tunnel + CDW_TUNNEL_ENDPOINT on
+            # the Lambda. Report the outcome but don't fail the smoke test on it.
+            query_cdw = next((n for n in names if n.endswith("query_cdw")), None)
+            if query_cdw:
+                res = await session.call_tool(query_cdw, {"sql": "SELECT 1 AS ok"})
+                probe = "".join(c.text for c in res.content if hasattr(c, "text"))
+                print(f"tools/call {query_cdw} (probe) ->", probe[:200])
+                if '"row_count"' in probe:
+                    print("  query_cdw: DB path is live")
+                else:
+                    print("  query_cdw: not reachable yet (expected until the tunnel is up)")
+
     # exit outside the async context managers to avoid exception-group noise
     if failure:
         sys.exit(f"FAIL: {failure}")

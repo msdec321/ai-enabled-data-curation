@@ -1,183 +1,174 @@
-// AutoDQA orchestrator — Cloudflare Worker PoC
+// AutoDQA orchestrator — Cloudflare Worker
 //
-// The agent loop from autodqa_agent.ipynb, re-hosted on Cloudflare behind
-// Zero Trust/Access:
+// The agent loop, re-hosted on Cloudflare behind Zero Trust/Access, driving the
+// AgentCore Gateway as its tool broker:
 //   browser ── Access (SSO/OTP) ──▶ this Worker
-//     ├── reasoning:  Bedrock Claude via Cloudflare AI Gateway (BYOK)
-//     ├── query_cdw:  D1 (synthetic PCORnet CDM — Tier-1 demo data)
-//     ├── search_etl / read_etl_file: R2 (synthetic ETL codebase)
-//     └── run_python: dqa-sandbox-runner via private service binding
+//     ├── reasoning: Bedrock Claude via Cloudflare AI Gateway (BYOK)
+//     └── tools:     AgentCore Gateway (MCP + Cognito OAuth) ──▶ Lambda broker
+//                       ├── query_cdw: vault-injected DB login → sandbox → tunnel → SQL Server
+//                       └── run_python: sandbox
+//
+// Every reasoning step, tool call, and result streams to the browser as SSE.
 
 import { renderPage } from "./ui";
 
 export interface Env {
-  CDW: D1Database;
-  ETL: KVNamespace; // synthetic ETL codebase (KV; R2 not activated on this account)
-  SANDBOX: Fetcher;
+  // Bedrock via Cloudflare AI Gateway
   CF_ACCOUNT_ID: string;
   CF_AIG_GATEWAY: string;
   AWS_REGION: string;
   MODEL_ID: string;
-  ACCESS_TEAM_DOMAIN: string; // e.g. "myteam" — empty until Access is enabled
-  ACCESS_AUD: string; // Access application AUD tag — empty until enabled
   CF_AIG_TOKEN: string; // secret
-  SANDBOX_SHARED_SECRET: string; // secret
+
+  // AgentCore Gateway (MCP) + Cognito OAuth
+  AGENTCORE_GATEWAY_URL: string;
+  COGNITO_TOKEN_ENDPOINT: string;
+  COGNITO_CLIENT_ID: string;
+  COGNITO_SCOPE: string;
+  COGNITO_CLIENT_SECRET: string; // secret
+
+  // Cloudflare Access (empty until enabled)
+  ACCESS_TEAM_DOMAIN: string;
+  ACCESS_AUD: string;
 }
 
 const MAX_TURNS = 24;
-const MAX_ROWS = 100;
 
 const SYSTEM_PROMPT = `You are AutoDQA, an autonomous data-quality analyst for a PCORnet CDM \
-clinical data warehouse. This is a Tier-1 DEMO environment: the warehouse is a SYNTHETIC \
-SQLite database (no PHI), but the ETL codebase you can search reflects the real warehouse's \
-T-SQL views, stored procedures, and mapping functions — root causes of data issues live there.
+clinical data warehouse on Microsoft SQL Server. The data is SYNTHETIC (no PHI). Your tools reach \
+the warehouse through a governed gateway that injects credentials for you.
 
-Tools:
-- query_cdw: read-only SQL against the warehouse. SQLite dialect (use LIMIT not TOP). \
-Tables: DEMOGRAPHIC, ENCOUNTER, DIAGNOSIS.
-- search_etl / read_etl_file: search and read the ETL codebase (views, procs, functions, docs).
-- run_python: isolated sandbox for computation. It has NO database access — inline any data \
-your code needs.
+- The query tool runs read-only T-SQL (SQL Server dialect — use TOP, not LIMIT). Tables: \
+DEMOGRAPHIC, ENCOUNTER, DIAGNOSIS.
+- The python tool runs code in an isolated sandbox with NO database access — inline any data your \
+code needs.
 
-Work step by step: gather evidence with tools first, then answer concisely with concrete \
-numbers. When you reference ETL code, cite file paths and line numbers. The PCORnet SEX \
-valueset is F, M, A, NI, UN, OT. Never attempt to modify data.`;
+Work step by step: gather evidence with the query tool, compute with python where helpful, then \
+answer concisely with concrete numbers. The PCORnet SEX valueset is F, M, A, NI, UN, OT. \
+Never attempt to modify data.`;
 
-const TOOLS = [
-  {
-    toolSpec: {
-      name: "query_cdw",
-      description:
-        "Run a single read-only SQL statement against the synthetic PCORnet CDM warehouse " +
-        "(SQLite dialect — use LIMIT, not TOP). Tables: DEMOGRAPHIC, ENCOUNTER, DIAGNOSIS.",
-      inputSchema: {
-        json: {
-          type: "object",
-          properties: { sql: { type: "string", description: "One read-only SQL statement" } },
-          required: ["sql"],
-        },
-      },
-    },
-  },
-  {
-    toolSpec: {
-      name: "search_etl",
-      description:
-        "Search every file in the ETL codebase (T-SQL views/procs/functions + markdown docs) " +
-        "for a regex or substring. Returns matching lines as path:line: text.",
-      inputSchema: {
-        json: {
-          type: "object",
-          properties: { pattern: { type: "string", description: "Regex or plain substring" } },
-          required: ["pattern"],
-        },
-      },
-    },
-  },
-  {
-    toolSpec: {
-      name: "read_etl_file",
-      description: "Read one file from the ETL codebase by its path (as returned by search_etl).",
-      inputSchema: {
-        json: {
-          type: "object",
-          properties: { path: { type: "string" } },
-          required: ["path"],
-        },
-      },
-    },
-  },
-  {
-    toolSpec: {
-      name: "run_python",
-      description:
-        "Execute Python in an isolated Cloudflare sandbox container. No database or network " +
-        "access — embed any input data in the code. Returns stdout/stderr.",
-      inputSchema: {
-        json: {
-          type: "object",
-          properties: { code: { type: "string" } },
-          required: ["code"],
-        },
-      },
-    },
-  },
-];
+// ---------- Cognito OAuth (client-credentials) ----------
 
-// ---------- Tool execution ----------
+let tokenCache: { token: string; exp: number } | null = null;
 
-async function execTool(name: string, input: any, env: Env, session: string): Promise<unknown> {
-  switch (name) {
-    case "query_cdw": {
-      const sql = String(input?.sql ?? "");
-      // Demo-tier guard. On the real CDW, read-only is enforced at the DB
-      // login (db_datareader), not here.
-      if (!/^\s*(select|with|pragma|explain)\b/i.test(sql)) {
-        return { error: "Only read-only statements (SELECT/WITH/PRAGMA/EXPLAIN) are allowed." };
-      }
-      try {
-        const res = await env.CDW.prepare(sql).all();
-        const rows = res.results ?? [];
-        return { row_count: rows.length, rows: rows.slice(0, MAX_ROWS), truncated: rows.length > MAX_ROWS };
-      } catch (e: any) {
-        return { error: String(e?.message ?? e) };
-      }
-    }
-    case "search_etl": {
-      const pattern = String(input?.pattern ?? "");
-      let re: RegExp | null = null;
-      try {
-        re = new RegExp(pattern, "i");
-      } catch {
-        re = null; // fall back to substring search
-      }
-      const listing = await env.ETL.list({ limit: 1000 });
-      const matches: string[] = [];
-      for (const key of listing.keys) {
-        const body = await env.ETL.get(key.name, "text");
-        if (!body) continue;
-        const lines = body.split("\n");
-        for (let i = 0; i < lines.length && matches.length < 60; i++) {
-          const hit = re ? re.test(lines[i]) : lines[i].toLowerCase().includes(pattern.toLowerCase());
-          if (hit) matches.push(`${key.name}:${i + 1}: ${lines[i].trim()}`);
-        }
-      }
-      return { match_count: matches.length, matches };
-    }
-    case "read_etl_file": {
-      const path = String(input?.path ?? "");
-      const content = await env.ETL.get(path, "text");
-      if (content === null) {
-        const listing = await env.ETL.list({ limit: 1000 });
-        return { error: `Not found: ${path}`, available_files: listing.keys.map((k) => k.name) };
-      }
-      return { path, content };
-    }
-    case "run_python": {
-      const code = String(input?.code ?? "");
-      const resp = await env.SANDBOX.fetch("https://sandbox/", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${env.SANDBOX_SHARED_SECRET}`,
-        },
-        body: JSON.stringify({ code, language: "python", session }),
-      });
-      const json = (await resp.json().catch(() => null)) as any;
-      if (!resp.ok || !json) return { error: `sandbox HTTP ${resp.status}`, detail: json };
-      return { stdout: json.stdout, stderr: json.stderr, error: json.error };
-    }
-    default:
-      return { error: `Unknown tool: ${name}` };
+async function getOAuthToken(env: Env): Promise<string> {
+  if (tokenCache && tokenCache.exp > Date.now() + 60_000) return tokenCache.token;
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: env.COGNITO_CLIENT_ID,
+    client_secret: env.COGNITO_CLIENT_SECRET,
+  });
+  if (env.COGNITO_SCOPE) body.set("scope", env.COGNITO_SCOPE);
+  const resp = await fetch(env.COGNITO_TOKEN_ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!resp.ok) {
+    throw new Error(`OAuth token failed: HTTP ${resp.status} — ${(await resp.text()).slice(0, 300)}`);
   }
+  const j = (await resp.json()) as any;
+  tokenCache = { token: j.access_token, exp: Date.now() + (j.expires_in ?? 3600) * 1000 };
+  return tokenCache.token;
+}
+
+// ---------- Minimal MCP client (streamable HTTP) ----------
+
+function parseSse(text: string): any {
+  const datas = text
+    .split("\n")
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => l.slice(5).trim());
+  for (let i = datas.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(datas[i]);
+    } catch {
+      /* keep scanning */
+    }
+  }
+  throw new Error(`no JSON-RPC in SSE response: ${text.slice(0, 300)}`);
+}
+
+class McpClient {
+  private nextId = 1;
+  private sessionId: string | null = null;
+  constructor(private url: string, private token: string) {}
+
+  private async rpc(method: string, params?: unknown, notification = false): Promise<any> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      authorization: `Bearer ${this.token}`,
+    };
+    if (this.sessionId) headers["mcp-session-id"] = this.sessionId;
+    const payload: any = { jsonrpc: "2.0", method };
+    if (!notification) payload.id = this.nextId++;
+    if (params !== undefined) payload.params = params;
+
+    const resp = await fetch(this.url, { method: "POST", headers, body: JSON.stringify(payload) });
+    const sid = resp.headers.get("mcp-session-id");
+    if (sid) this.sessionId = sid;
+    if (notification) return null;
+    if (!resp.ok) {
+      throw new Error(`MCP ${method}: HTTP ${resp.status} — ${(await resp.text()).slice(0, 300)}`);
+    }
+    const ct = resp.headers.get("content-type") || "";
+    const data = ct.includes("text/event-stream") ? parseSse(await resp.text()) : await resp.json();
+    if (data.error) throw new Error(`MCP ${method} error: ${JSON.stringify(data.error).slice(0, 300)}`);
+    return data.result;
+  }
+
+  async initialize(): Promise<void> {
+    await this.rpc("initialize", {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "autodqa-orchestrator", version: "1.0" },
+    });
+    await this.rpc("notifications/initialized", undefined, true);
+  }
+
+  async listTools(): Promise<any[]> {
+    return (await this.rpc("tools/list", {}))?.tools ?? [];
+  }
+
+  async callTool(name: string, args: unknown): Promise<any> {
+    return this.rpc("tools/call", { name, arguments: args });
+  }
+}
+
+// Map MCP tools -> Bedrock toolConfig, stripping the gateway's "<target>___"
+// prefix for cleaner names the model (and UI) see; remember the full name for
+// the actual tools/call.
+// Internal lifecycle tools the orchestrator drives directly — never exposed to
+// the model in the Bedrock toolConfig.
+const INTERNAL_TOOLS = new Set(["destroy_sandbox"]);
+// Args the orchestrator injects per call — stripped from the model's view.
+const ORCHESTRATOR_ARGS = new Set(["session"]);
+
+function toBedrockTools(mcpTools: any[]): { tools: any[]; nameMap: Record<string, string> } {
+  const nameMap: Record<string, string> = {};
+  const tools: any[] = [];
+  for (const t of mcpTools) {
+    const short = t.name.includes("___") ? t.name.split("___").pop() : t.name;
+    nameMap[short] = t.name; // keep the full name so the orchestrator can call it
+    if (INTERNAL_TOOLS.has(short)) continue;
+    const schema = t.inputSchema ?? { type: "object", properties: {} };
+    const props = { ...(schema.properties ?? {}) };
+    for (const a of ORCHESTRATOR_ARGS) delete props[a];
+    tools.push({
+      toolSpec: {
+        name: short,
+        description: t.description ?? "",
+        inputSchema: { json: { ...schema, properties: props } },
+      },
+    });
+  }
+  return { tools, nameMap };
 }
 
 // ---------- Bedrock via Cloudflare AI Gateway (BYOK) ----------
 
-async function converse(env: Env, messages: unknown[]): Promise<any> {
-  // Same endpoint shape the notebook uses; the gateway holds the IAM keys and
-  // does the SigV4 signing, so the Worker sends an unsigned request with only
-  // the gateway token.
+async function converse(env: Env, messages: unknown[], tools: unknown[]): Promise<any> {
   const url =
     `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_AIG_GATEWAY}` +
     `/aws-bedrock/bedrock-runtime/${env.AWS_REGION}/model/${encodeURIComponent(env.MODEL_ID)}/converse`;
@@ -190,8 +181,13 @@ async function converse(env: Env, messages: unknown[]): Promise<any> {
     body: JSON.stringify({
       system: [{ text: SYSTEM_PROMPT }],
       messages,
-      toolConfig: { tools: TOOLS },
-      inferenceConfig: { maxTokens: 4096, temperature: 0 },
+      toolConfig: { tools },
+      // Extended thinking requires temperature 1; the reasoning budget is part
+      // of maxTokens, so give headroom above the budget for the actual answer.
+      inferenceConfig: { maxTokens: 8000, temperature: 1 },
+      additionalModelRequestFields: {
+        reasoning_config: { type: "enabled", budget_tokens: 2000 },
+      },
     }),
   });
   if (!resp.ok) {
@@ -204,36 +200,132 @@ async function converse(env: Env, messages: unknown[]): Promise<any> {
 
 type Emit = (event: Record<string, unknown>) => Promise<void>;
 
-async function runAgent(task: string, session: string, env: Env, emit: Emit): Promise<void> {
+async function runAgent(task: string, env: Env, emit: Emit): Promise<void> {
+  // Establish the gateway session once per run (OAuth + MCP handshake + catalog).
+  await emit({ type: "trace", active: ["orchestrator"], label: "Receiving task" });
+  const token = await getOAuthToken(env);
+  const mcp = new McpClient(env.AGENTCORE_GATEWAY_URL, token);
+  // The broker is contacted here to LIST tools (catalog discovery), not to run
+  // one — the model needs the catalog before it can choose a tool.
+  await emit({ type: "trace", active: ["orchestrator", "broker"], label: "Discovering available tools" });
+  await mcp.initialize();
+  const { tools, nameMap } = toBedrockTools(await mcp.listTools());
+
+  // One ephemeral sandbox container per agent run: a unique session id, threaded
+  // into every tool call, and destroyed when the run ends. (Containers that
+  // escape teardown — e.g. on an exception — still auto-sleep, per the worker's
+  // sleepAfter setting.)
+  const runId = `run-${crypto.randomUUID()}`;
+  let containerStarted = false;
+  let toreDown = false;
+  const teardown = async () => {
+    if (toreDown || !containerStarted) return; // no container was created
+    toreDown = true;
+    const destroyFull = nameMap["destroy_sandbox"];
+    if (!destroyFull) return; // can't destroy — leave it "active"; sleepAfter reclaims it
+    await emit({ type: "trace", active: ["orchestrator", "broker", "sandbox"], label: "Tearing down the sandbox" });
+    try {
+      await mcp.callTool(destroyFull, { session: runId });
+    } catch {
+      /* best effort — sleepAfter is the fallback */
+    }
+    await emit({ type: "container", id: runId, state: "down" });
+    await emit({ type: "trace", active: [] });
+  };
+
   const messages: any[] = [{ role: "user", content: [{ text: task }] }];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    const out = await converse(env, messages);
+    await emit({ type: "trace", active: ["orchestrator", "aigw", "bedrock"], label: "Reasoning with the model" });
+    const out = await converse(env, messages, tools);
     const msg = out?.output?.message;
     if (!msg) throw new Error(`No message in model response: ${JSON.stringify(out).slice(0, 300)}`);
     messages.push(msg);
 
     const toolUses: any[] = [];
     for (const block of msg.content ?? []) {
+      // Reasoning blocks come back as reasoningContent on the Converse response;
+      // emit before text so the thought precedes the answer. The full block
+      // (with its signature) is preserved in `messages` above for tool-use turns.
+      if (block.reasoningContent?.reasoningText?.text) {
+        await emit({ type: "reasoning", text: block.reasoningContent.reasoningText.text });
+      }
       if (block.text) await emit({ type: "text", text: block.text });
       if (block.toolUse) toolUses.push(block.toolUse);
     }
 
     if (out.stopReason !== "tool_use" || toolUses.length === 0) {
+      await emit({ type: "trace", active: ["orchestrator"], label: "Returning the answer" });
       await emit({ type: "done", stopReason: out.stopReason, turns: turn + 1, usage: out.usage });
+      await teardown();
       return;
     }
 
     const resultBlocks: any[] = [];
     for (const tu of toolUses) {
-      await emit({ type: "tool_use", id: tu.toolUseId, name: tu.name, input: tu.input });
-      let result: unknown;
-      try {
-        result = await execTool(tu.name, tu.input, env, session);
-      } catch (e: any) {
-        result = { error: String(e?.message ?? e) };
+      // First sandbox-backed tool call of the run → the per-run container spins up.
+      if (!containerStarted) {
+        containerStarted = true;
+        await emit({ type: "container", id: runId, state: "up" });
       }
-      const resultText = JSON.stringify(result);
+      const full = nameMap[tu.name] ?? tu.name;
+      const cdwPath = full.includes("query_cdw");
+      const dataset = (tu.input?.dataset as string) || "CDW";
+
+      // The broker's tools/call is a single round trip — we can't observe the
+      // internal authorize→execute boundary from here. But the two phases are
+      // real (and auth is sub-second while execution is slow), so we show the
+      // authorization phase, dispatch the call, then switch the diagram to the
+      // execution phase after a brief beat while the call is still running.
+      const call = (async () => {
+        try {
+          // Inject the per-run session id so the broker routes to this run's
+          // container (overrides anything the model might have set).
+          return { res: await mcp.callTool(full, { ...(tu.input ?? {}), session: runId }) };
+        } catch (e: any) {
+          return { err: e };
+        }
+      })();
+
+      // Phase 1 — broker checks the registry and fetches credentials.
+      await emit({
+        type: "trace",
+        active: cdwPath
+          ? ["orchestrator", "broker", "registry", "vault"]
+          : ["orchestrator", "broker", "vault"],
+        label: cdwPath
+          ? `Authorizing ${tu.name} on ${dataset} + fetching credentials`
+          : `Fetching credentials for ${tu.name}`,
+      });
+      await emit({ type: "tool_use", id: tu.toolUseId, name: tu.name, input: tu.input });
+
+      // Phase 2 — broker dispatches to the sandbox, which runs the work.
+      let settled = false;
+      void call.then(() => { settled = true; });
+      await new Promise((r) => setTimeout(r, 700));
+      if (!settled) {
+        await emit({
+          type: "trace",
+          active: cdwPath
+            ? ["orchestrator", "broker", "sandbox", "cdw"]
+            : ["orchestrator", "broker", "sandbox"],
+          label: cdwPath ? "Running the query in the sandbox" : "Executing in the sandbox",
+        });
+      }
+
+      const { res, err } = await call;
+      let resultText: string;
+      let isError = false;
+      if (err) {
+        isError = true;
+        resultText = JSON.stringify({ error: String(err?.message ?? err) });
+      } else {
+        isError = Boolean(res?.isError);
+        resultText = (res?.content ?? [])
+          .map((c: any) => (typeof c?.text === "string" ? c.text : JSON.stringify(c)))
+          .join("\n");
+        if (!resultText) resultText = JSON.stringify(res);
+      }
       await emit({
         type: "tool_result",
         id: tu.toolUseId,
@@ -245,22 +337,23 @@ async function runAgent(task: string, session: string, env: Env, emit: Emit): Pr
         toolResult: {
           toolUseId: tu.toolUseId,
           content: [{ text: resultText.slice(0, 30000) }],
-          status: (result as any)?.error ? "error" : "success",
+          status: isError ? "error" : "success",
         },
       });
     }
     messages.push({ role: "user", content: resultBlocks });
   }
   await emit({ type: "error", message: `Stopped after ${MAX_TURNS} turns without a final answer.` });
+  await teardown();
 }
 
 // ---------- Cloudflare Access JWT validation ----------
 //
 // Access (enabled on the workers.dev domain via the dashboard) authenticates
-// users at the edge and forwards a signed JWT in cf-access-jwt-assertion.
-// Per Cloudflare docs the origin must validate that JWT (signature via the
-// team's JWKS, plus aud/exp/iss) so direct-to-origin requests can't bypass
-// the edge check. Enforced only when ACCESS_TEAM_DOMAIN + ACCESS_AUD are set.
+// users at the edge and forwards a signed JWT in cf-access-jwt-assertion. The
+// origin must validate it (signature via the team JWKS, plus aud/exp/iss) so
+// direct-to-origin requests can't bypass the edge. Enforced only when
+// ACCESS_TEAM_DOMAIN + ACCESS_AUD are set.
 
 let certCache: { certsUrl: string; keys: any[]; fetchedAt: number } | null = null;
 
@@ -346,7 +439,7 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {
-      let body: { task?: string; session?: string };
+      let body: { task?: string };
       try {
         body = await request.json();
       } catch {
@@ -354,7 +447,6 @@ export default {
       }
       const task = (body.task ?? "").trim();
       if (!task) return Response.json({ error: "missing 'task'" }, { status: 400 });
-      const session = (body.session ?? "demo").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || "demo";
 
       // Stream agent events to the browser as SSE while the loop runs.
       const { readable, writable } = new TransformStream();
@@ -366,7 +458,7 @@ export default {
       ctx.waitUntil(
         (async () => {
           try {
-            await runAgent(task, session, env, emit);
+            await runAgent(task, env, emit);
           } catch (e: any) {
             await emit({ type: "error", message: String(e?.message ?? e) }).catch(() => {});
           } finally {

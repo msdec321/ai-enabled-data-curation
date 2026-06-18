@@ -7,3 +7,4 @@ results/
 config.yaml
 .env
 *.env
+agentcore-gateway/.gateway_config.json

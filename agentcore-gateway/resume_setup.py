@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 import boto3
+from botocore.exceptions import ParamValidationError
 
 from setup_gateway import (
     GATEWAY_NAME, LAMBDA_NAME, TARGET_NAME, TOOL_SCHEMA, CONFIG_OUT, HERE,
@@ -82,23 +83,39 @@ def recover_cognito_client_info(gateway: dict) -> dict:
 
 
 def ensure_target(ctrl, gateway: dict, lambda_arn: str) -> str:
-    existing = ctrl.list_gateway_targets(gatewayIdentifier=gateway["gatewayId"]).get("items", [])
-    for t in existing:
+    gid = gateway["gatewayId"]
+    cfg = {"mcp": {"lambda": {"lambdaArn": lambda_arn, "toolSchema": {"inlinePayload": TOOL_SCHEMA}}}}
+    creds = [{"credentialProviderType": "GATEWAY_IAM_ROLE"}]
+    tool_names = [t["name"] for t in TOOL_SCHEMA]
+
+    # If the target exists, refresh its tool schema (it may predate query_cdw).
+    for t in ctrl.list_gateway_targets(gatewayIdentifier=gid).get("items", []):
         if t["name"] == TARGET_NAME:
-            print(f"target {TARGET_NAME} already exists ({t['targetId']})")
-            return t["targetId"]
+            tid = t["targetId"]
+            try:
+                ctrl.update_gateway_target(
+                    gatewayIdentifier=gid, targetId=tid, name=TARGET_NAME,
+                    targetConfiguration=cfg, credentialProviderConfigurations=creds,
+                )
+                print(f"updated target {TARGET_NAME} ({tid}); tools now: {tool_names}")
+                return tid
+            except ParamValidationError:
+                # Client-side schema bug — deleting + recreating would fail the
+                # same way and leave the gateway with no target. Keep it; re-raise.
+                raise
+            except Exception as e:
+                print(f"update_gateway_target failed ({type(e).__name__}: {e}); recreating")
+                ctrl.delete_gateway_target(gatewayIdentifier=gid, targetId=tid)
+                time.sleep(6)
+            break
+
     for attempt in range(8):
         try:
             target = ctrl.create_gateway_target(
-                gatewayIdentifier=gateway["gatewayId"],
-                name=TARGET_NAME,
-                targetConfiguration={"mcp": {"lambda": {
-                    "lambdaArn": lambda_arn,
-                    "toolSchema": {"inlinePayload": TOOL_SCHEMA},
-                }}},
-                credentialProviderConfigurations=[{"credentialProviderType": "GATEWAY_IAM_ROLE"}],
+                gatewayIdentifier=gid, name=TARGET_NAME,
+                targetConfiguration=cfg, credentialProviderConfigurations=creds,
             )
-            print(f"target {TARGET_NAME} ({target['targetId']}) -> {LAMBDA_NAME}")
+            print(f"target {TARGET_NAME} ({target['targetId']}); tools: {tool_names}")
             return target["targetId"]
         except ctrl.exceptions.ValidationException as e:
             if "AssumeRole" not in str(e):

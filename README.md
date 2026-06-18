@@ -4,7 +4,7 @@ An agent for autonomous data quality assessment of a clinical data warehouse (CD
 
 The design is **code-mode**: the agent reasons by writing code, and all model-authored code runs in an isolated sandbox rather than on the orchestrating host.
 
-- **Reasoning** — Claude on **Amazon Bedrock** (`ChatBedrockConverse`), optionally routed through a Cloudflare AI Gateway
+- **Reasoning** — Claude on **Amazon Bedrock** (`ChatBedrockConverse`), routed through a **Cloudflare AI Gateway** that holds the Bedrock credentials (BYOK) and signs the upstream requests
 - **Orchestration** — **LangGraph** (`create_react_agent`): a trusted local loop that holds no DB credentials and runs no model-written code
 - **Execution** — a **Cloudflare Sandbox** container that runs the agent's Python in isolation
 
@@ -17,7 +17,7 @@ The agent loop:
 1. The user submits a task through the Zero Trust front door (SSO/MFA); the LangGraph orchestrator sends the conversation context to Bedrock via the Cloudflare AI Gateway (access policies, audit logging, DLP).
 2. Bedrock replies — either "run this code" or a final answer.
 3. The orchestrator passes the execution request to the MCP Broker.
-4. The broker enforces tool and dataset allowlists (consulting the dataset registry), retrieves credentials from Keeper, and dispatches the code to the Cloudflare sandbox with credentials injected.
+4. The broker enforces tool and dataset allowlists (consulting the dataset registry), retrieves credentials from the secrets vault (AWS Secrets Manager — the org is not licensed for Keeper, which the architecture diagram still names), and dispatches the code to the Cloudflare sandbox with credentials injected.
 5. The sandbox code queries the CDW with read-only T-SQL and reads the documentation store (ETL code, docs).
 6. Result rows are pulled back into the sandbox for analysis.
 7. stdout/results return through the broker.
@@ -39,10 +39,11 @@ Trust boundaries:
 |------|------------|
 | `autodqa_agent.ipynb` | The main agent — Bedrock + LangGraph loop with `query_cdw`, `search_etl`/`read_etl_file`, and `run_python` tools |
 | `sandbox-worker/` | `dqa-sandbox-runner` — Cloudflare Worker that executes untrusted code in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container |
-| `orchestrator-worker/` | Cloudflare-hosted PoC: the notebook loop re-hosted as a Worker behind Cloudflare Access, with a chat UI, synthetic PCORnet CDM in D1, and synthetic ETL files in KV |
+| `orchestrator-worker/` | Cloudflare-hosted streaming web console: submit a task and watch the agent reason/call tools/answer live. Reasoning on Bedrock; tools driven through the AgentCore gateway |
 | `docs/target_architecture.md` | The code-mode architecture (diagram + trust model) |
 | `docs/` | Project Mermaid security proposal, provider evaluations, PHI data-flow inventory |
 | `config.yaml` | DB connection, ETL repo path, documentation paths, tables to assess |
+| `agentcore-gateway/` | Experiment: AWS AgentCore Gateway as the MCP broker front door (see its README) |
 | `agent.ipynb` | Earlier scratch notebook (superseded by `autodqa_agent.ipynb`) |
 | `legacy/` | The deprecated Claude Code multi-agent pipeline (see below) |
 
@@ -50,7 +51,7 @@ Trust boundaries:
 
 - Python 3.11+
 - ODBC Driver 18 for SQL Server (for the local `query_cdw` tool)
-- An Amazon Bedrock API key (bearer token) with access to Claude models
+- A Cloudflare AI Gateway with Bedrock BYOK credentials (IAM SigV4 keys for a Claude-enabled Bedrock account) stored in it — no AWS credentials are needed locally
 - A Cloudflare account on the Workers Paid plan (Containers), for the sandbox worker
 - Node.js + `wrangler` (for deploying the Workers)
 
@@ -62,7 +63,7 @@ Trust boundaries:
 git clone <repo-url>
 cd ai-enabled-data-curation
 python3 -m venv .venv
-.venv/bin/pip install "langchain-aws>=1.4.5" "langgraph>=0.6" "langchain-core>=0.3" "boto3>=1.35.87" pyodbc pyyaml requests jupyter
+.venv/bin/pip install "langchain>=1.0" "langchain-aws>=1.4.5" "langgraph>=0.6" "langchain-core>=0.3" "boto3>=1.35.87" pyodbc pyyaml requests jupyter
 ```
 
 ### 2. Install ODBC Driver 18 (Ubuntu/Debian)
@@ -129,21 +130,20 @@ tables:
 ### 5. Create `.env` (gitignored)
 
 ```bash
-# Bedrock
-AWS_BEARER_TOKEN_BEDROCK=<bedrock-api-key>
+# Cloudflare AI Gateway — handles Bedrock auth (BYOK keys are stored in the gateway)
+CF_ACCOUNT_ID=<account-id>
+CF_AIG_GATEWAY=<gateway-name>
+CF_AIG_TOKEN=<gateway-token>
+
+# Bedrock region (baked into the gateway endpoint path; must match the BYOK keys)
 export AWS_DEFAULT_REGION=us-east-1
 
 # Sandbox worker (from step 3)
 SANDBOX_WORKER_URL=https://dqa-sandbox-runner.<account>.workers.dev
 SANDBOX_SHARED_SECRET=<same value as the worker secret>
-
-# Optional — route Bedrock through a Cloudflare AI Gateway
-CF_ACCOUNT_ID=<account-id>
-CF_AIG_GATEWAY=<gateway-name>
-CF_AIG_TOKEN=<gateway-token>
 ```
 
-The AI Gateway path is toggled by `USE_AI_GATEWAY` in the notebook.
+All Bedrock calls go through the gateway — the notebook builds an unsigned boto3 client against the gateway endpoint and authenticates with `CF_AIG_TOKEN`; the gateway does the SigV4 signing.
 
 ## Usage
 
@@ -155,11 +155,11 @@ Run the agent from the notebook:
 
 Execute the cells top to bottom, then set `task` in the final cells and re-run. The agent streams each reason → act → observe step, so you can watch the tool calls and results as it works.
 
-### Hosted PoC (synthetic data)
+### Hosted web console
 
-`orchestrator-worker/` is the same loop deployed entirely on Cloudflare — chat UI behind Cloudflare Access, synthetic PCORnet CDM in D1, synthetic ETL codebase in KV, and four deterministically planted data-quality issues to find. See [`orchestrator-worker/README.md`](orchestrator-worker/README.md) for setup and the security posture.
+`orchestrator-worker/` deploys the agent as a Cloudflare Worker with a streaming web console — submit a data-quality task and watch the agent reason, call tools, and answer in real time. It reasons on Bedrock (via the AI Gateway) and drives all tools through the AgentCore gateway (`agentcore-gateway/`), so `query_cdw` reaches the real synthetic SQL Server and `run_python` runs in the sandbox. See [`orchestrator-worker/README.md`](orchestrator-worker/README.md) for setup and the security posture.
 
-The PoC is **Tier-0/1 by design: synthetic data only**. Do not point it at real CDW data — that requires the Project Mermaid Tier 2+ controls (DLP, redacted logs, BAA-covered services).
+It is **Tier-0/1 by design: synthetic data only**. Do not point it at real CDW data — that requires the Project Mermaid Tier 2+ controls (DLP, redacted logs, BAA-covered services).
 
 ## Legacy: Claude Code pipeline (deprecated)
 

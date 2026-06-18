@@ -18,7 +18,9 @@
       // packages into the image (e.g. pyodbc/drivers for the DQA pipeline).
       "image": "docker.io/cloudflare/sandbox:0.11.0-python",
       "instance_type": "lite",
-      "max_instances": 1
+      // One container per sandbox session — a cap of 1 means a second session
+      // (notebook + gateway + chat UI) hangs forever waiting for capacity.
+      "max_instances": 5
     }
   ],
   "durable_objects": {
