@@ -1,0 +1,7 @@
+CREATE VIEW etl.DEMOGRAPHIC AS
+-- Master demographic view: one row per patient across all source systems.
+SELECT * FROM etl.DEMOGRAPHIC_EPIC
+UNION ALL
+SELECT * FROM etl.DEMOGRAPHIC_ALLSCRIPTS
+UNION ALL
+SELECT * FROM etl.DEMOGRAPHIC_GECBI;

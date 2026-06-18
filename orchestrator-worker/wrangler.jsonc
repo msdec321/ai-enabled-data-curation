@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "autodqa-orchestrator",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "observability": { "enabled": true },
+
+  // Non-secret config. Secrets (CF_AIG_TOKEN, COGNITO_CLIENT_SECRET) are set
+  // via `wrangler secret put` — see README.
+  "vars": {
+    // Account + AI Gateway used for Bedrock (BYOK — the gateway signs with
+    // stored IAM keys; the Worker only sends cf-aig-authorization).
+    "CF_ACCOUNT_ID": "ccfb16c028dc5731cab073bdf569d8de",
+    "CF_AIG_GATEWAY": "data-curation-gateway",
+    "AWS_REGION": "us-east-1",
+    "MODEL_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+
+    // AgentCore Gateway (MCP) + its Cognito OAuth client. The client_id, token
+    // endpoint, and scope are identifiers, not secrets; the client SECRET is a
+    // Worker secret. All from agentcore-gateway/.gateway_config.json.
+    "AGENTCORE_GATEWAY_URL": "https://autodqa-gateway-8tf6k75tpz.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
+    "COGNITO_TOKEN_ENDPOINT": "https://agentcore-6782ebef.auth.us-east-1.amazoncognito.com/oauth2/token",
+    "COGNITO_CLIENT_ID": "6o8t2g79ade8ek3i44ij6ebkqb",
+    "COGNITO_SCOPE": "autodqa-gateway/invoke",
+
+    // Filled in AFTER enabling Cloudflare Access on the workers.dev domain
+    // (dashboard step). Both empty = Access JWT validation not enforced and
+    // the UI shows a "demo mode" warning banner.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
+  }
+}

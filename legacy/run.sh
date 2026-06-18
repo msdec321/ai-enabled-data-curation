@@ -4,11 +4,11 @@
 # =============================================================================
 # Launches the coordinator agent for autonomous data quality assessment.
 #
-# Usage:
-#   ./run.sh --config config.yaml
-#   ./run.sh --config config.yaml --tables DEMOGRAPHIC,ENCOUNTER
-#   ./run.sh --config config.yaml --resume-from-report
-#   ./run.sh --config config.yaml 75  # max turns
+# Usage (from the repo root):
+#   ./legacy/run.sh --config config.yaml
+#   ./legacy/run.sh --config config.yaml --tables DEMOGRAPHIC,ENCOUNTER
+#   ./legacy/run.sh --config config.yaml --resume-from-report
+#   ./legacy/run.sh --config config.yaml 75  # max turns
 #
 # Prerequisites:
 #   - Claude Code CLI installed (npm install -g @anthropic-ai/claude-code)
@@ -18,15 +18,17 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  # legacy/
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"                          # repo root
+INVOKE_DIR="$PWD"
 cd "$SCRIPT_DIR"
 
-# ── Activate venv ──
+# ── Activate venv (lives at the repo root) ──
 
-if [[ -d "$SCRIPT_DIR/.venv" ]]; then
-  source "$SCRIPT_DIR/.venv/bin/activate"
-elif [[ -d "$SCRIPT_DIR/venv" ]]; then
-  source "$SCRIPT_DIR/venv/bin/activate"
+if [[ -d "$ROOT_DIR/.venv" ]]; then
+  source "$ROOT_DIR/.venv/bin/activate"
+elif [[ -d "$ROOT_DIR/venv" ]]; then
+  source "$ROOT_DIR/venv/bin/activate"
 fi
 
 # ── Preflight checks ──
@@ -37,7 +39,12 @@ if ! command -v claude &>/dev/null; then
   exit 1
 fi
 
-if ! python3 -c "import mcp, pyodbc, yaml" 2>/dev/null; then
+PYTHON="${ROOT_DIR}/.venv/bin/python3"
+if [[ ! -x "$PYTHON" ]]; then
+  PYTHON="$(command -v python3)"
+fi
+
+if ! "$PYTHON" -c "import mcp, pyodbc, yaml" 2>/dev/null; then
   echo "Error: MCP server dependencies missing." >&2
   echo "Set up the venv with:" >&2
   echo "  python3 -m venv .venv && .venv/bin/pip install mcp[cli] pyodbc pyyaml" >&2
@@ -98,8 +105,14 @@ done
 
 if [[ -z "$CONFIG" ]]; then
   echo "Error: --config is required." >&2
-  echo "Usage: ./run.sh --config config.yaml" >&2
+  echo "Usage: ./legacy/run.sh --config config.yaml" >&2
   exit 2
+fi
+
+# Resolve a relative --config path against the directory the script was
+# invoked from (the config usually lives at the repo root, not in legacy/).
+if [[ "$CONFIG" != /* ]]; then
+  CONFIG="$INVOKE_DIR/$CONFIG"
 fi
 
 if [[ ! -f "$CONFIG" ]]; then
@@ -172,7 +185,7 @@ REVIEWER_TOOLS="$REVIEWER_TOOLS,mcp__doc_search__search_docs,mcp__doc_search__re
 
 # ── Export environment for coordinator and MCP servers ──
 
-export CONFIG="$SCRIPT_DIR/$CONFIG"
+export CONFIG="$CONFIG"
 export ETL_REPO="$ETL_REPO"
 export DOC_PATHS="$DOC_PATHS"
 export RESULTS_DIR="$RESULTS_DIR"
