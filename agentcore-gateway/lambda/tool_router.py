@@ -4,11 +4,15 @@ tool name the gateway passes in the client context as "<target>___<tool>".
 """
 import tool_destroy_sandbox
 import tool_query_cdw
+import tool_read_etl_file
 import tool_run_python
+import tool_search_etl
 
 TOOLS = {
     "run_python": tool_run_python.handle,
     "query_cdw": tool_query_cdw.handle,
+    "search_etl": tool_search_etl.handle,
+    "read_etl_file": tool_read_etl_file.handle,
     "destroy_sandbox": tool_destroy_sandbox.handle,
 }
 
