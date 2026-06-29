@@ -245,7 +245,6 @@ function addContainerLog(id, up) {
   d.appendChild(el("div", "lbl",
     (up ? "\\u{1F7E2} " : "\\u{26AB} ") + "Sandbox container " + shortId(id) + (up ? " created" : " destroyed")));
   log.appendChild(d);
-  d.scrollIntoView({ block: "end" });
 }
 
 function setTrace(active, label) {
@@ -270,11 +269,22 @@ function el(tag, cls, text) {
   return n;
 }
 
+// The page (window) is the scroll container. Pin to the bottom as content
+// streams in, but only when the user is already near the bottom — so scrolling
+// up to read history isn't fought.
+function nearBottom() {
+  const d = document.scrollingElement;
+  return d.scrollHeight - d.scrollTop - d.clientHeight < 120;
+}
+function scrollToBottom() {
+  const d = document.scrollingElement;
+  d.scrollTo({ top: d.scrollHeight });
+}
+
 function addBubble(role, text) {
   const m = el("div", "msg " + role);
   const b = el("div", "bubble", text);
   m.appendChild(b); log.appendChild(m);
-  b.scrollIntoView({ block: "end" });
   return b;
 }
 
@@ -283,7 +293,6 @@ function addReasoning(text) {
   d.appendChild(el("span", "rlabel", "\\u{1F4AD} reasoning"));
   d.appendChild(document.createTextNode(text));
   log.appendChild(d);
-  d.scrollIntoView({ block: "end" });
 }
 
 const toolCards = {};
@@ -293,7 +302,6 @@ function addTool(ev) {
   d.appendChild(el("summary", "", "\\u{1F527} " + ev.name));
   d.appendChild(el("pre", "", typeof input === "string" ? input : JSON.stringify(ev.input, null, 2)));
   log.appendChild(d); toolCards[ev.id] = d;
-  d.scrollIntoView({ block: "end" });
 }
 function addToolResult(ev) {
   const d = toolCards[ev.id]; if (!d) return;
@@ -310,7 +318,6 @@ function addStep(ev) {
   const route = (ev.active || []).filter((id) => id !== "orchestrator").map((id) => NODE_NAMES[id] || id);
   if (route.length) s.appendChild(el("div", "route", route.join(" → ")));
   log.appendChild(s);
-  s.scrollIntoView({ block: "end" });
 }
 
 form.addEventListener("submit", async (e) => {
@@ -324,6 +331,7 @@ form.addEventListener("submit", async (e) => {
   const status = el("div", "status");
   status.innerHTML = '<span class="spinner"></span>agent running…';
   log.appendChild(status);
+  scrollToBottom();
 
   try {
     const resp = await fetch("/api/chat", {
@@ -347,6 +355,7 @@ form.addEventListener("submit", async (e) => {
         const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
         if (!chunk.startsWith("data: ")) continue;
         const ev = JSON.parse(chunk.slice(6));
+        const stick = nearBottom();
         if (ev.type === "container") {
           if (ev.state === "up") { containerUp(ev.id); addContainerLog(ev.id, true); }
           else { containerDown(ev.id); addContainerLog(ev.id, false); }
@@ -358,7 +367,7 @@ form.addEventListener("submit", async (e) => {
         else if (ev.type === "trace") { setTrace(ev.active, ev.label); addStep(ev); }
         else if (ev.type === "error") log.appendChild(el("div", "error", ev.message));
         else if (ev.type === "done") status.textContent = "done — " + ev.turns + " model turns";
-        status.scrollIntoView({ block: "end" });
+        if (stick) scrollToBottom();
       }
     }
   } catch (err) {

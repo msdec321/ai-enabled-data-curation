@@ -26,10 +26,27 @@ DATASETS = {
         "credential": {"vault": "aws_sm", "id": os.environ.get("CDW_SECRET_ARN", "autodqa/cdw-readonly-login")},
         "egress": [],  # informational until the sandbox enforces per-session egress
     },
+    "ETL": {
+        "engine": "fileserver",  # read-only HTTP bridge over the ETL repo (etl-bridge/)
+        "tier": 1,  # synthetic/low-sensitivity ETL for now; secrets are denied at the bridge
+        # `base_url` is the TUNNEL endpoint the Lambda dials (ngrok -> local bridge),
+        # NOT the LAN host — set ETL_BRIDGE_URL on the Lambda once the bridge is up.
+        "connection": {
+            "base_url": os.environ.get("ETL_BRIDGE_URL", "<ETL_BRIDGE_URL_NOT_SET>"),
+        },
+        # The bridge bearer token lives in the vault, fetched per call.
+        "credential": {"vault": "aws_sm", "id": os.environ.get("ETL_SECRET_ARN", "autodqa/etl-bridge-token"), "key": "token"},
+        "egress": [],
+    },
 }
 
 # Which tools may operate on which datasets (deny by default).
-GRANTS = {("query_cdw", "CDW")}
+GRANTS = {
+    ("query_cdw", "CDW"),
+    ("list_etl", "ETL"),
+    ("read_etl", "ETL"),
+    ("grep_etl", "ETL"),
+}
 
 
 class NotAuthorized(Exception):

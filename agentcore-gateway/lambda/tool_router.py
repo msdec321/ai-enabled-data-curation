@@ -3,13 +3,21 @@ and exposes several tools; this routes a tools/call to the right handler by the
 tool name the gateway passes in the client context as "<target>___<tool>".
 """
 import tool_destroy_sandbox
+import tool_get_valuesets
+import tool_grep_etl
+import tool_list_etl
 import tool_query_cdw
+import tool_read_etl
 import tool_run_python
 
 TOOLS = {
     "run_python": tool_run_python.handle,
     "query_cdw": tool_query_cdw.handle,
     "destroy_sandbox": tool_destroy_sandbox.handle,
+    "list_etl": tool_list_etl.handle,
+    "read_etl": tool_read_etl.handle,
+    "grep_etl": tool_grep_etl.handle,
+    "get_valuesets": tool_get_valuesets.handle,
 }
 
 

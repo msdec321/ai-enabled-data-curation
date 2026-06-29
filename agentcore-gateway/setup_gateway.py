@@ -40,6 +40,7 @@ LAMBDA_ROLE = "autodqa-gateway-lambda-role"
 TARGET_NAME = "sandbox"
 SANDBOX_SECRET_NAME = "autodqa/sandbox-shared-secret"
 DB_SECRET_NAME = "autodqa/cdw-readonly-login"
+ETL_SECRET_NAME = "autodqa/etl-bridge-token"
 CONFIG_OUT = HERE / ".gateway_config.json"
 
 TOOL_SCHEMA = [
@@ -91,6 +92,76 @@ TOOL_SCHEMA = [
             "required": ["session"],
         },
     },
+    {
+        "name": "list_etl",
+        "description": (
+            "List the ETL repository's files (paths + sizes). Use this first to "
+            "understand the ETL codebase structure before reading or searching. "
+            "Read-only; secret/data files are not exposed."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "Per-run sandbox session id (set by the orchestrator)"},
+            },
+        },
+    },
+    {
+        "name": "read_etl",
+        "description": (
+            "Read one ETL source file by its repository-relative path (e.g. "
+            "'views/EncounterMap.sql'). Returns the file text. Paths are jailed "
+            "to the ETL repo and secret/data files are refused."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Repo-relative path, e.g. procedures/etl.load_DEMOGRAPHIC.StoredProcedure.sql"},
+                "session": {"type": "string", "description": "Per-run sandbox session id (set by the orchestrator)"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "grep_etl",
+        "description": (
+            "Search the ETL codebase for a pattern; returns matching file, line "
+            "number, and text. The workhorse for tracing a data-quality finding "
+            "to the ETL logic that produced it (grep a column or table name). "
+            "Literal substring by default."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string", "description": "Pattern to search for (e.g. a column or table name)"},
+                "regex": {"type": "boolean", "description": "Treat q as a regular expression (default false)"},
+                "max": {"type": "integer", "description": "Max matches to return (default 200)"},
+                "session": {"type": "string", "description": "Per-run sandbox session id (set by the orchestrator)"},
+            },
+            "required": ["q"],
+        },
+    },
+    {
+        "name": "get_valuesets",
+        "description": (
+            "Return the predefined valuesets (permissible coded values) for a CDM "
+            "table's columns, to check value conformance while profiling — e.g. a "
+            "SEX value outside A/F/M/NI/UN/OT is a data-quality issue. Call with a "
+            "table name (e.g. DEMOGRAPHIC) to get its constrained columns and their "
+            "allowed codes; columns NOT returned are unconstrained (profile by "
+            "range/format/nulls instead). Large valuesets are summarized — pass a "
+            "column name to fetch that column's full code list. Call with no "
+            "arguments to list which tables have valuesets."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": {"type": "string", "description": "CDM table, e.g. DEMOGRAPHIC, ENCOUNTER, DIAGNOSIS"},
+                "column": {"type": "string", "description": "Optional column name to fetch one column's full valueset"},
+                "session": {"type": "string", "description": "Per-run sandbox session id (set by the orchestrator)"},
+            },
+        },
+    },
 ]
 
 
@@ -138,6 +209,22 @@ def ensure_db_secret(sm) -> tuple[str, str]:
     return arn, conn.get("database", "CDW")
 
 
+def ensure_etl_secret(sm) -> str:
+    """The ETL bridge bearer token (transport credential for the local read-only
+    ETL file server). Sourced from $ETL_SERVER_TOKEN, else the persisted token
+    file the bridge writes (etl-bridge/.etl_server_token)."""
+    token = os.environ.get("ETL_SERVER_TOKEN", "").strip()
+    if not token:
+        tok_file = HERE.parent / "etl-bridge" / ".etl_server_token"
+        if tok_file.exists():
+            token = tok_file.read_text().strip()
+    if not token:
+        print("WARNING: no ETL bridge token ($ETL_SERVER_TOKEN or etl-bridge/"
+              ".etl_server_token) — read_etl/grep_etl will 401 until it's set.")
+    return _put_secret(sm, ETL_SECRET_NAME, json.dumps({"token": token}),
+                       "AutoDQA ETL bridge bearer token (broker-fetched)")
+
+
 def ensure_lambda_role(iam) -> str:
     try:
         return iam.get_role(RoleName=LAMBDA_ROLE)["Role"]["Arn"]
@@ -182,11 +269,26 @@ def grant_secret_read(iam, role_name: str, secret_arns) -> None:
     print(f"granted secretsmanager:GetSecretValue on {len(list(secret_arns))} secret(s) to {role_name}")
 
 
+def _catalog_json() -> str | None:
+    """The valueset catalog, converted YAML->JSON at build time so the Lambda can
+    read it with stdlib json (no pyyaml in the runtime). Bundled as valuesets.json
+    for the get_valuesets tool. Returns None if the catalog hasn't been generated."""
+    cat = HERE.parent / "valuesets" / "pcornet_cdm.yaml"
+    if not cat.exists():
+        print("WARNING: valuesets/pcornet_cdm.yaml not found — get_valuesets will "
+              "fail until you run valuesets/build_catalog.py")
+        return None
+    return json.dumps(yaml.safe_load(cat.read_text()))
+
+
 def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for py in sorted((HERE / "lambda").glob("*.py")):
             z.writestr(py.name, py.read_text())
+        catalog = _catalog_json()
+        if catalog is not None:
+            z.writestr("valuesets.json", catalog)
     code = buf.getvalue()
     env = {"Variables": env_vars}
     try:
@@ -212,22 +314,41 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
         return lam.get_function(FunctionName=LAMBDA_NAME)["Configuration"]["FunctionArn"]
 
 
+def _current_lambda_env(lam) -> dict:
+    """The Lambda's current env vars, or {} if it doesn't exist yet. Lets a
+    redeploy PRESERVE tunnel endpoints (CDW_TUNNEL_*, ETL_BRIDGE_URL) that were
+    set out-of-band (e.g. after restarting ngrok) and aren't in the local env —
+    so rerunning setup doesn't silently wipe a live tunnel."""
+    try:
+        return lam.get_function_configuration(FunctionName=LAMBDA_NAME).get(
+            "Environment", {}).get("Variables", {})
+    except lam.exceptions.ResourceNotFoundException:
+        return {}
+
+
 def provision_lambda(iam, lam, sm) -> str:
-    """Vault both secrets, allow the Lambda role to read them, deploy the Lambda
-    with only references + non-secret connection config. Shared with resume_setup."""
+    """Vault the secrets, allow the Lambda role to read them, deploy the Lambda
+    with only references + non-secret connection config. Shared with resume_setup.
+    Tunnel endpoints fall back to the live Lambda value, then a default, so a
+    redeploy without them exported preserves what's already there."""
+    cur = _current_lambda_env(lam)
     sandbox_arn = ensure_sandbox_secret(sm, os.environ["SANDBOX_SHARED_SECRET"])
     db_arn, db_database = ensure_db_secret(sm)
+    etl_arn = ensure_etl_secret(sm)
     role_arn = ensure_lambda_role(iam)
-    grant_secret_read(iam, LAMBDA_ROLE, [sandbox_arn, db_arn])
+    grant_secret_read(iam, LAMBDA_ROLE, [sandbox_arn, db_arn, etl_arn])
     env_vars = {
         "SANDBOX_WORKER_URL": os.environ["SANDBOX_WORKER_URL"],
         "SANDBOX_SECRET_ARN": sandbox_arn,
         "CDW_SECRET_ARN": db_arn,
         "CDW_DATABASE": db_database,
-        # The sandbox dials the TUNNEL, not the LAN IP — set these (export before
-        # running) once the tunnel is up; until then query_cdw can't connect.
-        "CDW_TUNNEL_ENDPOINT": os.environ.get("CDW_TUNNEL_ENDPOINT", ""),
-        "CDW_TUNNEL_PORT": os.environ.get("CDW_TUNNEL_PORT", "1433"),
+        # Tunnel endpoints the cloud dials (NOT LAN hosts). Export to override;
+        # otherwise the live Lambda value is preserved (see _current_lambda_env).
+        "CDW_TUNNEL_ENDPOINT": os.environ.get("CDW_TUNNEL_ENDPOINT", cur.get("CDW_TUNNEL_ENDPOINT", "")),
+        "CDW_TUNNEL_PORT": os.environ.get("CDW_TUNNEL_PORT", cur.get("CDW_TUNNEL_PORT", "1433")),
+        # ETL bridge (ngrok -> local read-only file server in etl-bridge/).
+        "ETL_SECRET_ARN": etl_arn,
+        "ETL_BRIDGE_URL": os.environ.get("ETL_BRIDGE_URL", cur.get("ETL_BRIDGE_URL", "")),
     }
     return deploy_lambda(lam, role_arn, env_vars)
 
