@@ -79,6 +79,40 @@ TOOL_SCHEMA = [
         },
     },
     {
+        "name": "search_etl",
+        "description": (
+            "Search the ETL codebase (synthetic, Tier-0/1) for a string, "
+            "case-insensitive. Returns matching file paths, line numbers, and "
+            "lines — use it to find which views/procedures/functions reference a "
+            "table or column when tracing an issue to its ETL root cause."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Case-insensitive substring to search for"},
+                "max_results": {"type": "integer", "description": "Max matching lines to return (default 40)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_etl_file",
+        "description": (
+            "Read a file from the ETL codebase (synthetic, Tier-0/1), scoped to "
+            "the ETL corpus. `path` is relative to the corpus root (as returned by "
+            "search_etl). Returns up to max_lines lines of content plus metadata."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Corpus-relative path (e.g. etl/tables/etl.DEMOGRAPHIC.View.sql)"},
+                "start_line": {"type": "integer", "description": "0-based line to start from (default 0)"},
+                "max_lines": {"type": "integer", "description": "Max lines to return (default 400)"},
+            },
+            "required": ["path"],
+        },
+    },
+    {
         "name": "destroy_sandbox",
         "description": (
             "Tear down the ephemeral sandbox container for a run's session. "
@@ -289,6 +323,13 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
         catalog = _catalog_json()
         if catalog is not None:
             z.writestr("valuesets.json", catalog)
+        # Bundle the synthetic ETL corpus so search_etl/read_etl_file can serve it
+        # from inside the Lambda (Tier-0/1: static synthetic text travels in the
+        # package; for the real ETL repo the executor moves in-network instead).
+        etl_root = HERE / "etl_corpus"
+        for f in sorted(etl_root.rglob("*")):
+            if f.is_file():
+                z.writestr(f"etl_corpus/{f.relative_to(etl_root).as_posix()}", f.read_bytes())
     code = buf.getvalue()
     env = {"Variables": env_vars}
     try:

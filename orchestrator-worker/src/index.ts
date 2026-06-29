@@ -30,6 +30,9 @@ export interface Env {
   // Cloudflare Access (empty until enabled)
   ACCESS_TEAM_DOMAIN: string;
   ACCESS_AUD: string;
+
+  // R2 bucket where each run's final report is persisted (see wrangler.jsonc).
+  REPORTS_BUCKET: R2Bucket;
 }
 
 const MAX_TURNS = 24;
@@ -46,6 +49,44 @@ code needs.
 Work step by step: gather evidence with the query tool, compute with python where helpful, then \
 answer concisely with concrete numbers. The PCORnet SEX valueset is F, M, A, NI, UN, OT. \
 Never attempt to modify data.`;
+
+// Instruction for the dedicated report turn: after the evidence-gathering loop
+// ends, the orchestrator asks the model once more to render a standalone report
+// document, which is then persisted to R2. Kept separate from the conversational
+// final answer so the deliverable has consistent structure.
+const REPORT_INSTRUCTION = `Now write the final data-quality report as a standalone Markdown \
+document for a reviewer who did NOT watch you work. The system's job is to surface data-quality \
+ISSUES and present each one so a reviewer can validate it. Follow this structure exactly.
+
+# AutoDQA Report
+
+**Task:** restate the data-quality task you were given.
+
+**Plan:** the approach you took — which checks you ran, and why.
+
+**Number of potential issues found:** an integer (0 if none); it must equal the number of issue entries below.
+
+Then ONE entry per potential issue, each separated by a horizontal rule (\`---\`) and laid out as:
+
+### Issue 1
+**Summary:** what the issue is, in one or two sentences.
+**Query:** the read-only SQL (one or more queries) that surfaced it, VERBATIM in a \`\`\`sql code block — \
+copied exactly as executed, with no reformatting and no queries you did not actually run.
+**Query results:** the actual values the query returned — the concrete numbers you observed.
+**Investigation findings:** your analysis — severity, how many rows are affected, and, when you traced \
+it through the ETL, the root cause with file path and line numbers.
+
+Repeat as "### Issue 2", "### Issue 3", … for every issue.
+
+If you ran queries that did NOT surface an issue (checks that came back clean), list them after the \
+issues so the clean result stays reproducible:
+
+## Checks performed (no issues found)
+For each: a one-line note of what it checked plus its result, then the query VERBATIM in a \`\`\`sql block.
+
+Base the report ONLY on evidence gathered in this session — never invent numbers or queries. If you found \
+no issues, set the count to 0, write no issue entries, and use "Checks performed" to show what you \
+validated. Output only the Markdown document — no preamble, no closing remarks.`;
 
 // ---------- Cognito OAuth (client-credentials) ----------
 
@@ -196,6 +237,65 @@ async function converse(env: Env, messages: unknown[], tools: unknown[]): Promis
   return resp.json();
 }
 
+// ---------- Final report ----------
+
+type ReportRef = { runId: string; reportId: string; url: string; filename: string; bytes: number };
+
+// A readable, sortable object name: UTC timestamp + a short slice of the run id
+// for collision safety (two runs in the same second still differ).
+// e.g. 2026-06-18_153045Z-3fa85f64. The full runId is preserved in metadata.
+function makeReportId(isoNow: string, runId: string): string {
+  const ts = isoNow.slice(0, 19).replace(/:/g, "").replace("T", "_") + "Z"; // 2026-06-18_153045Z
+  const short = runId.replace(/^run-/, "").slice(0, 8);
+  return `${ts}-${short}`;
+}
+
+// One more model turn that renders the standalone report, then persists it to
+// R2 under reports/<reportId>.md and serves a retrieval URL. Best-effort: a
+// failure here is surfaced but does not fail the run (the answer already
+// streamed). `tools` is passed through (not an empty list) because the message
+// history contains toolUse/toolResult blocks, which Bedrock Converse requires a
+// toolConfig to accompany; the instruction steers the model to just write.
+async function persistReport(
+  task: string,
+  env: Env,
+  messages: unknown[],
+  tools: unknown[],
+  runId: string,
+  emit: Emit,
+): Promise<ReportRef | null> {
+  try {
+    const reportMessages = [...messages, { role: "user", content: [{ text: REPORT_INSTRUCTION }] }];
+    const out = await converse(env, reportMessages, tools);
+    const md = (out?.output?.message?.content ?? [])
+      .map((b: any) => (typeof b?.text === "string" ? b.text : ""))
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    if (!md) throw new Error("model produced no report text");
+
+    const now = new Date().toISOString();
+    const reportId = makeReportId(now, runId);
+    await env.REPORTS_BUCKET.put(`reports/${reportId}.md`, md, {
+      httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+      customMetadata: { task: task.slice(0, 1024), runId, createdAt: now },
+    });
+
+    const ref: ReportRef = {
+      runId,
+      reportId,
+      url: `/api/report/${reportId}`,
+      filename: `autodqa-${reportId}.md`,
+      bytes: md.length,
+    };
+    await emit({ type: "report", ...ref });
+    return ref;
+  } catch (e: any) {
+    await emit({ type: "error", message: `Report generation failed: ${String(e?.message ?? e)}` });
+    return null;
+  }
+}
+
 // ---------- Agent loop ----------
 
 type Emit = (event: Record<string, unknown>) => Promise<void>;
@@ -255,8 +355,12 @@ async function runAgent(task: string, env: Env, emit: Emit): Promise<void> {
     }
 
     if (out.stopReason !== "tool_use" || toolUses.length === 0) {
+      // Final answer reached. Render the standalone report and persist it before
+      // we finish — the sandbox can go; the report lives in R2, written here.
+      await emit({ type: "trace", active: ["orchestrator", "aigw", "bedrock"], label: "Writing the final report" });
+      const report = await persistReport(task, env, messages, tools, runId, emit);
       await emit({ type: "trace", active: ["orchestrator"], label: "Returning the answer" });
-      await emit({ type: "done", stopReason: out.stopReason, turns: turn + 1, usage: out.usage });
+      await emit({ type: "done", stopReason: out.stopReason, turns: turn + 1, usage: out.usage, report });
       await teardown();
       return;
     }
@@ -436,6 +540,25 @@ export default {
         renderPage({ enforced: accessEnforced(env), email: access.email, model: env.MODEL_ID }),
         { headers: { "content-type": "text/html;charset=utf-8" } },
       );
+    }
+
+    // Serve a persisted report. Behind the same Access gate as everything else.
+    // `?download=1` forces a file download; otherwise it renders inline.
+    if (request.method === "GET" && url.pathname.startsWith("/api/report/")) {
+      const id = decodeURIComponent(url.pathname.slice("/api/report/".length));
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) {
+        return new Response("invalid report id", { status: 400 });
+      }
+      const obj = await env.REPORTS_BUCKET.get(`reports/${id}.md`);
+      if (!obj) return new Response("report not found", { status: 404 });
+      const disp = url.searchParams.get("download") ? "attachment" : "inline";
+      return new Response(obj.body, {
+        headers: {
+          "content-type": "text/markdown; charset=utf-8",
+          "content-disposition": `${disp}; filename="autodqa-${id}.md"`,
+          "cache-control": "no-store",
+        },
+      });
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {

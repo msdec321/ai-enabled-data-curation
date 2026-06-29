@@ -160,6 +160,12 @@ export function renderPage(opts: { enforced: boolean; email?: string; model: str
   .step .route { color: #6f6c78; font-size: 11px; margin-top: 1px; }
   .status { color: #8a8794; font-size: 12.5px; margin: 8px 0; }
   .error { background: #3b1518; border: 1px solid #6e2a30; color: #f0a0a0; padding: 10px 14px; border-radius: 8px; margin: 8px 0; white-space: pre-wrap; }
+  .report-card { margin: 14px 8% 14px 0; padding: 12px 14px; background: #16271f; border: 1px solid #2f6f57; border-radius: 10px; }
+  .report-card .rhead { color: #7fd9b3; font-weight: 600; font-size: 13.5px; margin-bottom: 8px; }
+  .report-card a { display: inline-block; margin-right: 16px; color: #8fb3e8; text-decoration: none; font-size: 13px; }
+  .report-card a:hover { text-decoration: underline; }
+  .report-card .bytes { color: #6f6c78; font-size: 12px; }
+  .report-card .rname { color: #8a8794; font-size: 12px; font-family: ui-monospace, "SF Mono", monospace; margin-bottom: 8px; }
   form { position: fixed; bottom: 0; left: var(--pane); right: 0; background: #16161dee; backdrop-filter: blur(4px); border-top: 1px solid #2c2c38; padding: 14px 20px; }
   .formrow { max-width: 820px; margin: 0 auto; display: flex; gap: 10px; }
   textarea { flex: 1; resize: none; background: #20202a; color: #e8e6e3; border: 1px solid #34343f; border-radius: 10px; padding: 10px 12px; font: inherit; height: 64px; }
@@ -298,7 +304,7 @@ function addReasoning(text) {
 const toolCards = {};
 function addTool(ev) {
   const d = el("details", "tool");
-  const input = ev.input && (ev.input.sql || ev.input.code || ev.input.pattern || ev.input.path);
+  const input = ev.input && (ev.input.sql || ev.input.code || ev.input.query || ev.input.path);
   d.appendChild(el("summary", "", "\\u{1F527} " + ev.name));
   d.appendChild(el("pre", "", typeof input === "string" ? input : JSON.stringify(ev.input, null, 2)));
   log.appendChild(d); toolCards[ev.id] = d;
@@ -308,6 +314,23 @@ function addToolResult(ev) {
   let pretty = ev.preview;
   try { pretty = JSON.stringify(JSON.parse(ev.preview), null, 2); } catch {}
   d.appendChild(el("pre", "result", pretty + (ev.truncated ? "\\n… (truncated)" : "")));
+}
+
+function addReport(ev) {
+  const d = el("div", "report-card");
+  d.appendChild(el("div", "rhead", "\\u{1F4C4} Final report saved"));
+  if (ev.filename) d.appendChild(el("div", "rname", ev.filename));
+  const view = document.createElement("a");
+  view.href = ev.url; view.target = "_blank"; view.rel = "noopener";
+  view.textContent = "View report";
+  d.appendChild(view);
+  const dl = document.createElement("a");
+  dl.href = ev.url + "?download=1";
+  dl.textContent = "Download .md";
+  d.appendChild(dl);
+  if (ev.bytes) d.appendChild(el("span", "bytes", Math.max(1, Math.round(ev.bytes / 1024)) + " KB"));
+  log.appendChild(d);
+  d.scrollIntoView({ block: "end" });
 }
 
 const NODE_NAMES = { orchestrator: "Orchestrator", aigw: "AI Gateway", bedrock: "Bedrock", broker: "MCP Broker", registry: "Dataset Registry", vault: "Secrets Manager", sandbox: "Sandbox", cdw: "CDW", docstore: "Documentation Store" };
@@ -365,6 +388,7 @@ form.addEventListener("submit", async (e) => {
         else if (ev.type === "tool_use") addTool(ev);
         else if (ev.type === "tool_result") addToolResult(ev);
         else if (ev.type === "trace") { setTrace(ev.active, ev.label); addStep(ev); }
+        else if (ev.type === "report") addReport(ev);
         else if (ev.type === "error") log.appendChild(el("div", "error", ev.message));
         else if (ev.type === "done") status.textContent = "done — " + ev.turns + " model turns";
         if (stick) scrollToBottom();
