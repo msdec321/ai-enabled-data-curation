@@ -39,20 +39,38 @@ while IFS= read -r line || [ -n "$line" ]; do
   envargs+=( --env "$key=$val" )
 done < .env
 
-# One-time setup (creates the execution role + ECR repo + local config). Safe to
-# re-run; skipped once .bedrock_agentcore.yaml exists. May prompt on first run.
-if [ ! -f .bedrock_agentcore.yaml ]; then
-  echo ">> agentcore configure (one-time) ..."
-  "$AGENTCORE" configure -e entrypoint.py -n autodqa -r "$AWS_REGION" \
-    --non-interactive --disable-memory
+# Inbound auth: if frontend/.frontend_config.json exists, switch the runtime to a
+# Cognito JWT authorizer (so the browser can invoke it directly); otherwise IAM
+# (the SDK/CLI default). NOTE: a runtime is IAM *or* JWT — flipping to JWT means
+# `deploy.sh invoke` (IAM) stops working; use frontend/invoke_jwt.py instead.
+authz_args=()
+FRONTEND_CFG="$REPO_ROOT/frontend/.frontend_config.json"
+if [ -f "$FRONTEND_CFG" ]; then
+  AUTHZ="$("$REPO_ROOT/.venv/bin/python" -c "import json,sys;print(json.dumps(json.load(open(sys.argv[1]))['authorizer_config']))" "$FRONTEND_CFG")"
+  authz_args=(--authorizer-config "$AUTHZ")
+  echo ">> inbound auth: Cognito JWT (frontend/.frontend_config.json)"
+else
+  echo ">> inbound auth: IAM (default)"
 fi
+
+# configure is idempotent under --non-interactive (reuses the role/ECR); re-run
+# every time so config — including inbound auth — stays current.
+echo ">> agentcore configure ..."
+"$AGENTCORE" configure -e entrypoint.py -n autodqa -r "$AWS_REGION" \
+  --non-interactive --disable-memory "${authz_args[@]}"
 
 echo ">> agentcore launch  (CodeBuild ARM64 in the cloud — creates billable AWS resources)"
 echo "   profile=$AWS_PROFILE region=$AWS_REGION  env vars wired: $(( ${#envargs[@]} / 2 ))"
 "$AGENTCORE" launch -a autodqa --auto-update-on-conflict "${envargs[@]}"
 
-cat <<'EOF'
-
-Done. Smoke-test it with:
-  ./deploy.sh invoke '{"task": "Use run_python to compute 6*7 and report it."}'
-EOF
+if [ ${#authz_args[@]} -gt 0 ]; then
+  echo
+  echo "Done. Runtime uses Cognito JWT auth — IAM 'deploy.sh invoke' no longer works."
+  echo "Smoke-test the bearer-token path with:"
+  echo "  (cd ../frontend && AUTODQA_UI_USER=... AUTODQA_UI_PASSWORD=... \\"
+  echo "     AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python invoke_jwt.py)"
+else
+  echo
+  echo "Done. Smoke-test it with:"
+  echo "  ./deploy.sh invoke '{\"task\": \"Use run_python to compute 6*7 and report it.\"}'"
+fi

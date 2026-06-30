@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoDQA</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 16px; border-bottom: 1px solid #21262d; display: flex;
+           justify-content: space-between; align-items: center; }
+  header b { color: #58a6ff; }
+  #who { color: #8b949e; font-size: 12px; }
+  .panel { max-width: 900px; width: 100%; margin: 0 auto; padding: 16px; flex: 1;
+           display: flex; flex-direction: column; min-height: 0; }
+  #login { gap: 8px; }
+  input { background: #010409; border: 1px solid #30363d; color: #c9d1d9;
+          padding: 8px 10px; border-radius: 6px; font: inherit; }
+  button { background: #238636; border: 0; color: #fff; padding: 8px 14px;
+           border-radius: 6px; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .err { color: #f85149; min-height: 18px; }
+  #stream { flex: 1; overflow-y: auto; padding-right: 6px; }
+  .msg { padding: 6px 10px; margin: 6px 0; border-radius: 6px; white-space: pre-wrap;
+         word-break: break-word; }
+  .user      { background: #161b22; border-left: 3px solid #58a6ff; }
+  .assistant { background: #0f1620; border-left: 3px solid #2ea043; }
+  .tool      { color: #d29922; }
+  .result    { color: #8b949e; }
+  .error     { color: #f85149; }
+  form#taskForm { display: flex; gap: 8px; margin-top: 8px; }
+  #task { flex: 1; }
+</style>
+</head>
+<body>
+  <header><span><b>AutoDQA</b> — data-quality agent</span><span id="who"></span></header>
+
+  <div class="panel" id="loginPanel">
+    <div id="login">
+      <input id="email" type="email" placeholder="email" autocomplete="username">
+      <input id="password" type="password" placeholder="password" autocomplete="current-password">
+      <button id="loginBtn">Sign in</button>
+      <div class="err" id="loginErr"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="appPanel" hidden>
+    <div id="stream"></div>
+    <form id="taskForm">
+      <input id="task" placeholder="Ask a data-quality question…" autocomplete="off">
+      <button id="send" type="submit">Send</button>
+    </form>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

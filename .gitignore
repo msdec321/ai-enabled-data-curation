@@ -8,6 +8,8 @@ config.yaml
 .env
 *.env
 agentcore-gateway/.gateway_config.json
+frontend/.frontend_config.json
+frontend/config.js
 
 # local ETL bridge bearer token
 etl-bridge/.etl_server_token
