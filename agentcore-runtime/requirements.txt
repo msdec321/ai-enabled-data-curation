@@ -1,0 +1,11 @@
+# AutoDQA agent on Bedrock AgentCore Runtime.
+# No pyodbc / DB drivers: tools are remote via the AgentCore Gateway, so the
+# runtime image stays light.
+bedrock-agentcore
+langchain>=1.0
+langchain-aws>=1.4.5
+langchain-core>=0.3
+langgraph>=0.6
+langchain-mcp-adapters>=0.1
+boto3>=1.35.87
+requests
