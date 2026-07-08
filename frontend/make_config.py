@@ -14,6 +14,16 @@ cfg = json.loads((HERE / ".frontend_config.json").read_text())
 yaml_text = (HERE.parent / "agentcore-runtime" / ".bedrock_agentcore.yaml").read_text()
 arn = re.search(r"agent_arn:\s*(arn:aws:bedrock-agentcore:\S+)", yaml_text).group(1)
 
-out = {"region": cfg["region"], "clientId": cfg["client_id"], "runtimeArn": arn}
+
+def _model():
+    envp = HERE.parent / "agentcore-runtime" / ".env"
+    if envp.exists():
+        for line in envp.read_text().splitlines():
+            if line.strip().startswith("MODEL_ID="):
+                return line.split("=", 1)[1].strip()
+    return ""
+
+
+out = {"region": cfg["region"], "clientId": cfg["client_id"], "runtimeArn": arn, "model": _model()}
 (HERE / "config.js").write_text("window.AUTODQA_CONFIG = " + json.dumps(out) + ";\n")
 print("wrote config.js:", json.dumps(out))

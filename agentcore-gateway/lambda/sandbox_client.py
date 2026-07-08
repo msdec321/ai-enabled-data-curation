@@ -44,7 +44,10 @@ def run_in_sandbox(code: str, session: str, env: dict | None = None) -> dict:
     payload = {"code": code, "language": "python", "session": session}
     if env:
         payload["env"] = env
-    return _post(payload, timeout=110)
+    # Headroom for a cold sandbox container: first run pip-installs python-tds
+    # (~20s) on top of container cold-start. Kept under the Lambda's own timeout.
+    # (Removed once the sandbox bakes in its deps / we move to AWS MicroVMs.)
+    return _post(payload, timeout=240)
 
 
 def destroy_sandbox(session: str) -> dict:

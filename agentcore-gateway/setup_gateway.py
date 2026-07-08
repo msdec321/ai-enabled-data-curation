@@ -339,7 +339,7 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
             Role=role_arn,
             Handler="tool_router.handler",
             Code={"ZipFile": code},
-            Timeout=120,
+            Timeout=300,
             Environment=env,
         )
         print(f"created Lambda {LAMBDA_NAME}")
@@ -349,7 +349,7 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
         lam.get_waiter("function_updated_v2").wait(FunctionName=LAMBDA_NAME)
         lam.update_function_configuration(
             FunctionName=LAMBDA_NAME, Handler="tool_router.handler",
-            Environment=env, Timeout=120,
+            Environment=env, Timeout=300,
         )
         print(f"updated Lambda {LAMBDA_NAME}")
         return lam.get_function(FunctionName=LAMBDA_NAME)["Configuration"]["FunctionArn"]
