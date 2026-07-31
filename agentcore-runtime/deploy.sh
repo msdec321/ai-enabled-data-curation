@@ -3,7 +3,7 @@
 #
 # Wires every var from .env into `agentcore launch --env` flags, so secrets stay
 # in the gitignored .env (never duplicated into a command or shell history).
-# Uses the autodqa-admin profile + us-east-1.
+# Uses the bigarc-autodqa profile + us-east-1.
 #
 # Usage:  ./deploy.sh            # configure (first run) + launch
 #         ./deploy.sh invoke '<json>'   # convenience: invoke after deploy
@@ -17,7 +17,7 @@ cd "$SCRIPT_DIR"
 AGENTCORE="$REPO_ROOT/.venv/bin/agentcore"
 [ -x "$AGENTCORE" ] || AGENTCORE="agentcore"
 
-export AWS_PROFILE="${AWS_PROFILE:-autodqa-admin}"
+export AWS_PROFILE="${AWS_PROFILE:-bigarc-autodqa}"
 export AWS_REGION="${AWS_REGION:-us-east-1}"
 export AGENTCORE_SUPPRESS_RECOMMENDATION=1   # silence the @aws/agentcore CLI nag
 
@@ -68,7 +68,7 @@ if [ ${#authz_args[@]} -gt 0 ]; then
   echo "Done. Runtime uses Cognito JWT auth — IAM 'deploy.sh invoke' no longer works."
   echo "Smoke-test the bearer-token path with:"
   echo "  (cd ../frontend && AUTODQA_UI_USER=... AUTODQA_UI_PASSWORD=... \\"
-  echo "     AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python invoke_jwt.py)"
+  echo "     AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python invoke_jwt.py)"
 else
   echo
   echo "Done. Smoke-test it with:"

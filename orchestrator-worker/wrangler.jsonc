@@ -20,21 +20,30 @@
 			"remote": true
 		}
 	],
+	// RETIRED PROOF OF CONCEPT — superseded by agentcore-runtime/. Kept for
+	// reference only; do not deploy.
+	//
+	// The AgentCore/Cognito identifiers below were scrubbed: they named a gateway in
+	// a now-retired personal AWS account, and leaving real values here risked another
+	// component being pointed at the wrong stack. The institutional deployment is
+	// AWS account 202102860812 (BigARC); if this Worker is ever revived, take its
+	// values from agentcore-gateway/.gateway_config.json.
+	//
 	// Non-secret config. Secrets (CF_AIG_TOKEN, COGNITO_CLIENT_SECRET) are set
 	// via `wrangler secret put` — see README.
 	"vars": {
 		// Account + AI Gateway used for Bedrock (BYOK — the gateway signs with
 		// stored IAM keys; the Worker only sends cf-aig-authorization).
-		"CF_ACCOUNT_ID": "ccfb16c028dc5731cab073bdf569d8de",
+		"CF_ACCOUNT_ID": "<cloudflare-account-id>",
 		"CF_AIG_GATEWAY": "data-curation-gateway",
 		"AWS_REGION": "us-east-1",
 		"MODEL_ID": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
 		// AgentCore Gateway (MCP) + its Cognito OAuth client. The client_id, token
 		// endpoint, and scope are identifiers, not secrets; the client SECRET is a
 		// Worker secret. All from agentcore-gateway/.gateway_config.json.
-		"AGENTCORE_GATEWAY_URL": "https://autodqa-gateway-8tf6k75tpz.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
-		"COGNITO_TOKEN_ENDPOINT": "https://agentcore-6782ebef.auth.us-east-1.amazoncognito.com/oauth2/token",
-		"COGNITO_CLIENT_ID": "6o8t2g79ade8ek3i44ij6ebkqb",
+		"AGENTCORE_GATEWAY_URL": "https://<gateway-id>.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp",
+		"COGNITO_TOKEN_ENDPOINT": "https://<cognito-domain-prefix>.auth.us-east-1.amazoncognito.com/oauth2/token",
+		"COGNITO_CLIENT_ID": "<cognito-app-client-id>",
 		"COGNITO_SCOPE": "autodqa-gateway/invoke",
 		// Filled in AFTER enabling Cloudflare Access on the workers.dev domain
 		// (dashboard step). Both empty = Access JWT validation not enforced and

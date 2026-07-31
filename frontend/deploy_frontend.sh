@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Build config.js, upload the static front-end to S3, and invalidate CloudFront.
-# Uses boto3 (no aws CLI on this box) + the autodqa-admin profile.
+# Uses boto3 (no aws CLI on this box) + the bigarc-autodqa profile.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$SCRIPT_DIR"
-export AWS_PROFILE="${AWS_PROFILE:-autodqa-admin}"
+export AWS_PROFILE="${AWS_PROFILE:-bigarc-autodqa}"
 export AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 PY="$REPO_ROOT/.venv/bin/python"
 

@@ -2,6 +2,7 @@
 and exposes several tools; this routes a tools/call to the right handler by the
 tool name the gateway passes in the client context as "<target>___<tool>".
 """
+import tool_clone_etl
 import tool_destroy_sandbox
 import tool_get_valuesets
 import tool_grep_etl
@@ -13,6 +14,10 @@ import tool_run_python
 import tool_search_etl
 
 TOOLS = {
+    # NOTE: clone_etl is routable but deliberately NOT in setup_gateway.py's
+    # TOOL_SCHEMA, so it is invocable by direct Lambda invoke for testing while
+    # staying out of the agent-facing gateway catalog until it is proven.
+    "clone_etl": tool_clone_etl.handle,
     "run_python": tool_run_python.handle,
     "query_cdw": tool_query_cdw.handle,
     "search_etl": tool_search_etl.handle,

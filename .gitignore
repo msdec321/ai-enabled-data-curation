@@ -1,6 +1,7 @@
 .DS_Store
 __pycache__/
 *.pyc
+.ipynb_checkpoints/
 .venv/
 results/
 !results/.gitkeep
@@ -18,3 +19,4 @@ etl-bridge/.etl_server_token
 agentcore-runtime/.bedrock_agentcore.yaml
 agentcore-runtime/.bedrock_agentcore/
 agentcore-runtime/.dockerignore
+sandbox-microvm/.microvm_config.json

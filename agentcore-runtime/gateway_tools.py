@@ -13,7 +13,6 @@ onto the Python/LangGraph agent:
 The MCP wire protocol itself is handled by langchain-mcp-adapters; we add the
 session-injection / internal-tool layer on top.
 """
-import asyncio
 import contextvars
 import os
 import time
@@ -30,12 +29,11 @@ INTERNAL_TOOLS = {"destroy_sandbox"}
 # ephemeral sandbox container. (contextvars keeps this correct under concurrency.)
 current_session = contextvars.ContextVar("gateway_session", default="autodqa")
 
-# Serialize sandbox tool calls within a run. The model may batch several calls in
-# one turn (e.g. three query_cdw counts); they share ONE per-run sandbox container
-# and race on its cold `pip install python-tds`, hanging until the timeout. This
-# lock forces them sequential — the first call warms the container, the rest reuse
-# it. (Moot once deps are baked into the sandbox image / on AWS MicroVMs.)
-_sandbox_lock = asyncio.Lock()
+# (Concurrent sandbox calls no longer need a lock: on Lambda MicroVMs the per-run
+# VM launch is idempotent by session `clientToken`, and the sandbox server is
+# single-threaded with per-request env save/restore — so batched calls can't clash
+# on the process-global os.environ. The old lock existed only to serialize the
+# now-removed cold `pip install python-tds`.)
 
 _token_cache = {"token": None, "exp": 0.0}
 
@@ -74,8 +72,7 @@ def _with_session(tool: StructuredTool, display_name: str) -> StructuredTool:
 
     async def _call(**kwargs):
         kwargs["session"] = current_session.get()
-        async with _sandbox_lock:  # serialize concurrent calls sharing one container
-            return await tool.ainvoke(kwargs)
+        return await tool.ainvoke(kwargs)
 
     return StructuredTool(
         name=display_name,

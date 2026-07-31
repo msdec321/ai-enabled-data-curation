@@ -9,14 +9,17 @@ engine: "mssql"
 cdm: "pcornet"
 
 connection:
-  driver: "ODBC Driver 18 for SQL Server"
-  server: "<SERVER_NAME>"
+  server: "<SERVER_IP_OR_HOST>"   # e.g. the institutional CDW at 129.106.31.60
+  port: 1433
   database: "<DATABASE_NAME>"
-  # For Windows auth:
-  # trusted_connection: "yes"
-  # For SQL auth:
-  # uid: "<USERNAME>"
-  # pwd: "<PASSWORD>"
+  # SQL auth only — the cloud sandbox connects with pytds, not Windows auth. Use a
+  # READ-ONLY login (db_datareader); the grant is the entire read-only guarantee.
+  # For a password with special characters, single-quote the value in YAML.
+  uid: "<USERNAME>"
+  pwd: "<PASSWORD>"
+  # If the server requires TLS, pytds negotiates it; "yes" trusts the server cert
+  # without CA validation (OK for synthetic data — use a validated CA cert for real
+  # CDW). NOTE: not yet plumbed into the pytds runner (tool_query_cdw.py).
   TrustServerCertificate: "yes"
 
 sources:

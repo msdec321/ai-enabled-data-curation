@@ -11,7 +11,7 @@ through the AgentCore Gateway.
 agentcore invoke ──▶ AgentCore Runtime (this package)
                         ├─ reasoning: Bedrock via Cloudflare AI Gateway (BYOK, v1)
                         └─ tools:     AgentCore Gateway (MCP + Cognito OAuth)
-                                         └─ Lambda broker → sandbox → tunnel → SQL Server
+                                         └─ Lambda broker → sandbox → VPC egress → SQL Server
 ```
 
 ## Layout

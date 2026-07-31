@@ -1,11 +1,32 @@
 # AutoDQA agent on Bedrock AgentCore Runtime.
 # No pyodbc / DB drivers: tools are remote via the AgentCore Gateway, so the
 # runtime image stays light.
-bedrock-agentcore
-langchain>=1.0
-langchain-aws>=1.4.5
-langchain-core>=0.3
-langgraph>=0.6
-langchain-mcp-adapters>=0.1
+#
+# THE LANGCHAIN/MCP STACK IS EXACT-PINNED ON PURPOSE. These packages are tightly
+# coupled and the image builds in the cloud (CodeBuild), so unpinned ranges mean every
+# deploy re-resolves and can land on a combination that has never been tested. That is
+# what broke the 2026-07-30 deploy: langchain-mcp-adapters was `>=0.1`, the build took a
+# newer release whose callbacks module does
+#     from mcp.shared.context import RequestContext
+# and the transitively-resolved `mcp` did not export it. The container died on import of
+# gateway_tools, so the Runtime never started and every invoke returned
+# HTTP 424 "An error occurred when starting the runtime" — with the real cause only
+# visible in CloudWatch.
+#
+# `mcp` is pinned EXPLICITLY even though it is only a transitive dependency of
+# langchain-mcp-adapters. Leaving it implicit is precisely what allowed the mismatch.
+#
+# These are the versions verified working locally (test_gateway.py plus a live
+# gateway round trip of all five ETL tools). Bump them deliberately, together, and
+# re-run that round trip — not by widening a range.
+bedrock-agentcore==1.14.1
+langchain==1.3.8
+langchain-core==1.4.6
+langchain-aws==1.5.0
+langgraph==1.2.4
+langchain-mcp-adapters==0.3.0
+mcp==1.27.1
+
+# Looser is fine: outside the langchain/mcp coupling.
 boto3>=1.35.87
 requests

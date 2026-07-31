@@ -1,5 +1,14 @@
 # ETL bridge — local read-only file server for the ETL repo
 
+> **CURRENTLY UNUSED.** The agent no longer reads the ETL through this bridge. A
+> read-only snapshot of the ETL source is baked into the sandbox microVM image at
+> `/opt/etl` (see `sandbox-microvm/build_image.py` and
+> `agentcore-gateway/lambda/etl_sandbox.py`), so `list_etl`/`read_etl`/`grep_etl` are
+> plain filesystem reads inside the VM — no ngrok tunnel, no bearer token, no vault
+> lookup. This directory is kept because its jail/allowlist/denylist logic is the
+> reference implementation those tools port, and because the next step is a GitLab
+> service account rather than a return to this design.
+
 A small server that runs **on your machine** (the trusted side, on the campus
 VPN) and exposes a narrow read API over the ETL source tree, so the cloud agent
 can read ETL code to put data-quality findings in context. It mirrors the DB
@@ -23,7 +32,8 @@ dumb:
 # terminal 1 — the bridge (binds 127.0.0.1:8000; leave it running)
 ./.venv/bin/python etl-bridge/etl_server.py
 
-# terminal 2 — the public tunnel (your DB tunnel stays on its own `ngrok tcp 1433`)
+# terminal 2 — the public tunnel for the ETL bridge (the CDW is reached in-network
+# over the sandbox's VPC egress connector now, so this is the only ngrok tunnel left)
 ngrok http 8000
 ```
 
@@ -39,8 +49,8 @@ Sanity-check the full path before relying on it:
 curl https://<subdomain>.ngrok-free.dev/health     # -> {"service":"autodqa-etl-bridge","ok":true}
 ```
 
-> Free-plan ngrok: if a second concurrent tunnel is refused, add an `etl` entry
-> to your `ngrok.yml` and run `ngrok start db etl` so one agent serves both.
+> This is now the only ngrok tunnel in the stack — the CDW moved in-network
+> (VPC egress connector), so a single free-plan `ngrok http 8000` suffices.
 
 ## The bearer token is persisted
 
@@ -60,12 +70,11 @@ forces a new token (and then you must re-vault it).
 
 The common case is the middle row: ngrok hands out a new
 `https://<subdomain>.ngrok-free.dev` each session, so after restarting it, point
-the cloud side at the new URL. This is the exact analog of updating
-`CDW_TUNNEL_ENDPOINT` for the DB tunnel — a surgical env-var merge on the Lambda,
-no full redeploy:
+the cloud side at the new URL — a surgical env-var merge on the Lambda, no full
+redeploy:
 
 ```bash
-AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ./.venv/bin/python - <<'PY'
+AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ./.venv/bin/python - <<'PY'
 import boto3
 lam = boto3.client("lambda"); NAME = "autodqa-run-python"
 env = lam.get_function_configuration(FunctionName=NAME)["Environment"]["Variables"]

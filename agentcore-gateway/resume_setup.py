@@ -7,7 +7,7 @@ the gateway's authorizer config, verifies the execution role's trust policy,
 creates the target (with retry) if missing, grants the Lambda invoke, and
 writes .gateway_config.json. Safe to rerun.
 
-    AWS_PROFILE=<admin-profile> AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python resume_setup.py
+    AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python resume_setup.py
 """
 import json
 import os
@@ -21,6 +21,7 @@ from botocore.exceptions import ParamValidationError
 from setup_gateway import (
     GATEWAY_NAME, LAMBDA_NAME, TARGET_NAME, TOOL_SCHEMA, CONFIG_OUT, HERE,
     allow_gateway_to_invoke, provision_lambda, load_dotenv,
+    require_expected_account,
 )
 
 REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -127,6 +128,7 @@ def ensure_target(ctrl, gateway: dict, lambda_arn: str) -> str:
 
 
 def main() -> None:
+    require_expected_account()          # refuse to touch a stack in the wrong account
     iam = boto3.client("iam", region_name=REGION)
     lam = boto3.client("lambda", region_name=REGION)
     sm = boto3.client("secretsmanager", region_name=REGION)

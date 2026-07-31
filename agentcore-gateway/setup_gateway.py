@@ -19,12 +19,15 @@ Manager secrets, Cognito pools, and AgentCore gateways. The notebook never needs
 these credentials — it only consumes the gateway with an OAuth token.
 
     ../.venv/bin/pip install "bedrock-agentcore-starter-toolkit>=0.1.10" boto3
-    AWS_PROFILE=<admin-profile> ../.venv/bin/python setup_gateway.py
+    AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python setup_gateway.py
 """
+import base64
 import io
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -38,16 +41,57 @@ GATEWAY_NAME = "autodqa-gateway"
 LAMBDA_NAME = "autodqa-run-python"
 LAMBDA_ROLE = "autodqa-gateway-lambda-role"
 TARGET_NAME = "sandbox"
-SANDBOX_SECRET_NAME = "autodqa/sandbox-shared-secret"
 DB_SECRET_NAME = "autodqa/cdw-readonly-login"
-ETL_SECRET_NAME = "autodqa/etl-bridge-token"
+GITLAB_SECRET_NAME = "autodqa/gitlab-ssh-key"
 CONFIG_OUT = HERE / ".gateway_config.json"
+
+# The institutional (BigARC) account. Every AutoDQA component must live here: the
+# gateway, the broker Lambda, the sandbox microVM image, and the Runtime.
+EXPECTED_ACCOUNT = os.environ.get("AUTODQA_EXPECTED_ACCOUNT", "202102860812")
+
+
+def require_expected_account() -> str:
+    """Abort unless the active credentials are the institutional account.
+
+    Guards against the failure this actually caused: a wrong AWS_PROFILE silently
+    creates a SECOND, parallel stack in another account. That happened -- a gateway,
+    Cognito pool and broker Lambda were built in a since-retired personal account, and
+    because the Lambda's MICROVM_IMAGE_ARN still referenced the institutional sandbox
+    image, run-microvm failed with a cross-account AccessDeniedException that looked
+    like a permissions bug rather than a wrong-account bug. Nothing stopped it,
+    because these scripts are idempotent by design and will happily build a fresh
+    stack wherever they are pointed.
+
+    Override with AUTODQA_EXPECTED_ACCOUNT if the stack is ever moved deliberately.
+    """
+    ident = boto3.client("sts").get_caller_identity()
+    account = ident["Account"]
+    if account != EXPECTED_ACCOUNT:
+        sys.exit(
+            f"\nREFUSING TO RUN: wrong AWS account.\n"
+            f"  active   : {account}  ({ident.get('Arn','')})\n"
+            f"  expected : {EXPECTED_ACCOUNT}  (institutional / BigARC)\n"
+            f"  profile  : AWS_PROFILE={os.environ.get('AWS_PROFILE','<unset>')}\n\n"
+            f"Re-run with:  AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION={REGION} ...\n"
+            f"Running against another account would create a parallel stack there and\n"
+            f"leave the two silently diverging. Set AUTODQA_EXPECTED_ACCOUNT to move\n"
+            f"the deployment deliberately.\n"
+        )
+    print(f"account check OK: {account} (profile {os.environ.get('AWS_PROFILE','<unset>')})")
+    return account
+
+
+# NOTE: ETL_SECRET_NAME ("autodqa/etl-bridge-token") was removed. The ETL bridge is
+# retired -- list_etl/read_etl/grep_etl now clone the synthetic ETL repo from GitLab
+# into the sandbox, so there is no bridge bearer token to vault. The credential that
+# path DOES need is the GitLab SSH key, provisioned as GITLAB_SECRET_NAME below. The
+# existing etl-bridge-token entry is orphaned and can be deleted.
 
 TOOL_SCHEMA = [
     {
         "name": "run_python",
         "description": (
-            "Execute Python in an isolated Cloudflare sandbox (remote compute, "
+            "Execute Python in an isolated sandbox microVM (remote compute, "
             "no CDW or ETL repo access). Use for analysis on data already "
             "retrieved. Print anything you want returned."
         ),
@@ -222,41 +266,82 @@ def _put_secret(sm, name: str, payload: str, desc: str) -> str:
     return arn
 
 
-def ensure_sandbox_secret(sm, value: str) -> str:
-    """The sandbox bearer (transport credential). ../.env stays the dev source;
-    this copies it into the vault the broker Lambda reads."""
-    return _put_secret(sm, SANDBOX_SECRET_NAME, json.dumps({"shared_secret": value}),
-                       "AutoDQA sandbox worker bearer secret (broker-fetched)")
-
-
-def ensure_db_secret(sm) -> tuple[str, str]:
-    """The CDW read-only login (data credential), from ../config.yaml's
-    connection block. Returns (secret ARN, database name)."""
+def ensure_db_secret(sm) -> tuple[str, str, str, str]:
+    """The CDW read-only login (vaulted) plus its non-secret connection coords,
+    from ../config.yaml's connection block. Returns
+    (secret ARN, server, port, database)."""
     cfg = yaml.safe_load((HERE.parent / "config.yaml").read_text())
     conn = cfg["connection"]
     uid, pwd = conn.get("uid", ""), conn.get("pwd", "")
     if not uid or not pwd:
-        print("WARNING: config.yaml connection has no uid/pwd — the tunneled "
-              "cloud path requires SQL auth, not Windows auth.")
+        print("WARNING: config.yaml connection has no uid/pwd — the cloud path "
+              "requires SQL auth, not Windows auth.")
     arn = _put_secret(sm, DB_SECRET_NAME, json.dumps({"uid": uid, "pwd": pwd}),
                       "AutoDQA CDW read-only DB login (broker-fetched, injected into the sandbox)")
-    return arn, conn.get("database", "CDW")
+    return (arn, str(conn.get("server", "")), str(conn.get("port", 1433)),
+            conn.get("database", "CDW"))
 
 
-def ensure_etl_secret(sm) -> str:
-    """The ETL bridge bearer token (transport credential for the local read-only
-    ETL file server). Sourced from $ETL_SERVER_TOKEN, else the persisted token
-    file the bridge writes (etl-bridge/.etl_server_token)."""
-    token = os.environ.get("ETL_SERVER_TOKEN", "").strip()
-    if not token:
-        tok_file = HERE.parent / "etl-bridge" / ".etl_server_token"
-        if tok_file.exists():
-            token = tok_file.read_text().strip()
-    if not token:
-        print("WARNING: no ETL bridge token ($ETL_SERVER_TOKEN or etl-bridge/"
-              ".etl_server_token) — read_etl/grep_etl will 401 until it's set.")
-    return _put_secret(sm, ETL_SECRET_NAME, json.dumps({"token": token}),
-                       "AutoDQA ETL bridge bearer token (broker-fetched)")
+def _is_encrypted_private_key(pem: str) -> bool:
+    """True if the SSH private key is passphrase-protected.
+
+    Two formats to handle, and the naive check only covers one:
+      * legacy PEM  — carries a `Proc-Type: 4,ENCRYPTED` / `DEK-Info` header.
+      * OPENSSH v1  — no header at all. The base64 body decodes to
+        b"openssh-key-v1\\0" followed by a length-prefixed cipher name, which is
+        "none" for an unencrypted key. Grepping the text for "ENCRYPTED" always
+        misses this, which is the format ssh-keygen has emitted by default for years.
+    """
+    if "ENCRYPTED" in pem.split("-----")[0] or "DEK-Info:" in pem:
+        return True
+    body = "".join(l.strip() for l in pem.splitlines() if "-----" not in l)
+    try:
+        raw = base64.b64decode(body)
+    except Exception:
+        return False                       # unparseable: let ssh report it later
+    magic = b"openssh-key-v1\x00"
+    if not raw.startswith(magic):
+        return False                       # not OPENSSH v1; PEM check above applies
+    off = len(magic)
+    cipher_len = int.from_bytes(raw[off:off + 4], "big")
+    cipher = raw[off + 4:off + 4 + cipher_len].decode("ascii", "replace")
+    return cipher != "none"
+
+
+def ensure_gitlab_secret(sm) -> str | None:
+    """The GitLab SSH private key the agent clones the ETL repo with (vaulted).
+
+    Sourced from $AUTODQA_GITLAB_KEY, else ~/.ssh/autodqa_gitlab_ed25519. Stored as
+    JSON so the public key travels with it -- handy for confirming which key GitLab
+    should have authorised without digging the private half out of the vault.
+
+    Returns None (and provisions nothing) when no key file is present, so a deploy on a
+    machine without the key is not blocked; the tooling simply has no GitLab access.
+
+    Same handling as the CDW login: only the ARN reaches the Lambda env, the value is
+    fetched per call, and it is injected into the ephemeral sandbox as an env var --
+    never embedded in a code body, never written to the image.
+    """
+    path = Path(os.environ.get("AUTODQA_GITLAB_KEY")
+                or (Path.home() / ".ssh" / "autodqa_gitlab_ed25519"))
+    if not path.is_file():
+        print(f"no GitLab key at {path} — skipping {GITLAB_SECRET_NAME} "
+              f"(set AUTODQA_GITLAB_KEY to provision it)")
+        return None
+    private = path.read_text()
+    if "PRIVATE KEY" not in private:
+        sys.exit(f"{path} does not look like an SSH private key")
+    if _is_encrypted_private_key(private):
+        sys.exit(f"{path} is passphrase-protected; the agent runs unattended and cannot "
+                 f"supply one. Provision a key with no passphrase.")
+    pub_path = Path(str(path) + ".pub")
+    public = pub_path.read_text().strip() if pub_path.is_file() else ""
+    arn = _put_secret(sm, GITLAB_SECRET_NAME,
+                      json.dumps({"private_key": private, "public_key": public}),
+                      "AutoDQA GitLab SSH key (broker-fetched, injected into the sandbox)")
+    fp = public.split()[1][:16] + "..." if public else "(no .pub alongside)"
+    print(f"vaulted GitLab SSH key from {path.name} [{fp}]")
+    return arn
 
 
 def ensure_lambda_role(iam) -> str:
@@ -303,6 +388,47 @@ def grant_secret_read(iam, role_name: str, secret_arns) -> None:
     print(f"granted secretsmanager:GetSecretValue on {len(list(secret_arns))} secret(s) to {role_name}")
 
 
+def grant_microvm_access(iam, role_name: str) -> None:
+    """Let the broker Lambda manage per-session sandbox microVMs (the AWS-native
+    sandbox on Lambda MicroVMs — see ../sandbox-microvm/ and lambda/sandbox_client.py)."""
+    iam.put_role_policy(
+        RoleName=role_name,
+        PolicyName="autodqa-manage-sandbox-microvms",
+        PolicyDocument=json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Action": ["lambda:RunMicrovm", "lambda:GetMicrovm",
+                           "lambda:CreateMicrovmAuthToken", "lambda:TerminateMicrovm",
+                           # required to attach the ingress/egress network connectors
+                           "lambda:PassNetworkConnector"],
+                "Resource": "*",
+            }],
+        }),
+    )
+    print(f"granted sandbox-microvm manage perms to {role_name}")
+
+
+def _microvm_image_arn() -> str:
+    """The sandbox microVM image ARN, written by sandbox-microvm/build_image.py."""
+    cfg = HERE.parent / "sandbox-microvm" / ".microvm_config.json"
+    return json.loads(cfg.read_text()).get("image_arn", "") if cfg.exists() else ""
+
+
+def _add_boto3(z) -> None:
+    """Bundle a new-enough boto3 into the Lambda package so sandbox_client can call
+    the lambda-microvms service (the managed runtime's boto3 may predate it). Task-root
+    packages take precedence over the runtime's on sys.path."""
+    tmp = tempfile.mkdtemp(prefix="autodqa-boto3-")
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "boto3>=1.43.42", "-t", tmp],
+                   check=True)
+    root = Path(tmp)
+    for f in root.rglob("*"):
+        if f.is_file() and "__pycache__" not in f.parts:
+            z.writestr(f.relative_to(root).as_posix(), f.read_bytes())
+    print("bundled boto3 into the Lambda package")
+
+
 def _catalog_json() -> str | None:
     """The valueset catalog, converted YAML->JSON at build time so the Lambda can
     read it with stdlib json (no pyyaml in the runtime). Bundled as valuesets.json
@@ -320,16 +446,25 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for py in sorted((HERE / "lambda").glob("*.py")):
             z.writestr(py.name, py.read_text())
+        # The pinned GitLab host key travels with the code (extensionless, so the *.py
+        # glob above misses it). Not a secret — a public host key — but gitlab_clone.py
+        # refuses to run without it, since the alternative is disabling host-key
+        # checking on a path we hand a private key to.
+        kh = HERE / "lambda" / "gitlab_known_hosts"
+        if kh.is_file():
+            z.writestr(kh.name, kh.read_text())
         catalog = _catalog_json()
         if catalog is not None:
             z.writestr("valuesets.json", catalog)
-        # Bundle the synthetic ETL corpus so search_etl/read_etl_file can serve it
-        # from inside the Lambda (Tier-0/1: static synthetic text travels in the
-        # package; for the real ETL repo the executor moves in-network instead).
-        etl_root = HERE / "etl_corpus"
-        for f in sorted(etl_root.rglob("*")):
-            if f.is_file():
-                z.writestr(f"etl_corpus/{f.relative_to(etl_root).as_posix()}", f.read_bytes())
+        # NOTE: etl_corpus/ is deliberately NOT bundled any more. All five ETL tools
+        # (list_etl, read_etl, grep_etl, search_etl, read_etl_file) now read the repo
+        # the sandbox clones from GitLab, via etl_sandbox.py.
+        # The old 13-file Lambda-bundled corpus used a different path layout
+        # (etl/tables/etl.DEMOGRAPHIC.View.sql vs CDW/views/etl.DEMOGRAPHIC.sql), so
+        # while both were live the tools disagreed about what the ETL contained and a
+        # path from list_etl could not be read by read_etl_file. Leaving it out of the
+        # package means a stale copy cannot silently win.
+        _add_boto3(z)  # new-enough boto3 for lambda-microvms (sandbox_client)
     code = buf.getvalue()
     env = {"Variables": env_vars}
     try:
@@ -339,7 +474,7 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
             Role=role_arn,
             Handler="tool_router.handler",
             Code={"ZipFile": code},
-            Timeout=300,
+            Timeout=180,
             Environment=env,
         )
         print(f"created Lambda {LAMBDA_NAME}")
@@ -349,7 +484,7 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
         lam.get_waiter("function_updated_v2").wait(FunctionName=LAMBDA_NAME)
         lam.update_function_configuration(
             FunctionName=LAMBDA_NAME, Handler="tool_router.handler",
-            Environment=env, Timeout=300,
+            Environment=env, Timeout=180,
         )
         print(f"updated Lambda {LAMBDA_NAME}")
         return lam.get_function(FunctionName=LAMBDA_NAME)["Configuration"]["FunctionArn"]
@@ -357,9 +492,14 @@ def deploy_lambda(lam, role_arn: str, env_vars: dict) -> str:
 
 def _current_lambda_env(lam) -> dict:
     """The Lambda's current env vars, or {} if it doesn't exist yet. Lets a
-    redeploy PRESERVE tunnel endpoints (CDW_TUNNEL_*, ETL_BRIDGE_URL) that were
-    set out-of-band (e.g. after restarting ngrok) and aren't in the local env —
-    so rerunning setup doesn't silently wipe a live tunnel."""
+    redeploy PRESERVE values set out-of-band and absent from the local env — the CDW
+    endpoint (now from config.yaml), the microVM image ARN and the egress connectors —
+    so rerunning setup doesn't wipe a live value.
+
+    Note this preserves only the keys provision_lambda re-declares. The retired
+    ETL_BRIDGE_URL / ETL_SECRET_ARN are no longer among them, so a redeploy drops
+    them from the live function — which is the intent: the ETL snapshot now ships in
+    the sandbox image."""
     try:
         return lam.get_function_configuration(FunctionName=LAMBDA_NAME).get(
             "Environment", {}).get("Variables", {})
@@ -370,26 +510,41 @@ def _current_lambda_env(lam) -> dict:
 def provision_lambda(iam, lam, sm) -> str:
     """Vault the secrets, allow the Lambda role to read them, deploy the Lambda
     with only references + non-secret connection config. Shared with resume_setup.
-    Tunnel endpoints fall back to the live Lambda value, then a default, so a
-    redeploy without them exported preserves what's already there."""
+    The CDW endpoint comes from config.yaml (env override wins, then the live
+    Lambda value), so a redeploy without config.yaml handy is non-destructive."""
     cur = _current_lambda_env(lam)
-    sandbox_arn = ensure_sandbox_secret(sm, os.environ["SANDBOX_SHARED_SECRET"])
-    db_arn, db_database = ensure_db_secret(sm)
-    etl_arn = ensure_etl_secret(sm)
+    db_arn, db_server, db_port, db_database = ensure_db_secret(sm)
+    gitlab_arn = ensure_gitlab_secret(sm)
     role_arn = ensure_lambda_role(iam)
-    grant_secret_read(iam, LAMBDA_ROLE, [sandbox_arn, db_arn, etl_arn])
+    grant_secret_read(iam, LAMBDA_ROLE, [a for a in (db_arn, gitlab_arn) if a])
+    grant_microvm_access(iam, LAMBDA_ROLE)
     env_vars = {
-        "SANDBOX_WORKER_URL": os.environ["SANDBOX_WORKER_URL"],
-        "SANDBOX_SECRET_ARN": sandbox_arn,
+        # Sandbox is an AWS Lambda MicroVM (see lambda/sandbox_client.py).
+        "MICROVM_IMAGE_ARN": _microvm_image_arn() or cur.get("MICROVM_IMAGE_ARN", ""),
+        # Sandbox egress connectors (setup_vpc_egress.py); empty -> INTERNET_EGRESS.
+        "MICROVM_EGRESS_CONNECTORS": os.environ.get("MICROVM_EGRESS_CONNECTORS", cur.get("MICROVM_EGRESS_CONNECTORS", "")),
         "CDW_SECRET_ARN": db_arn,
         "CDW_DATABASE": db_database,
-        # Tunnel endpoints the cloud dials (NOT LAN hosts). Export to override;
-        # otherwise the live Lambda value is preserved (see _current_lambda_env).
-        "CDW_TUNNEL_ENDPOINT": os.environ.get("CDW_TUNNEL_ENDPOINT", cur.get("CDW_TUNNEL_ENDPOINT", "")),
-        "CDW_TUNNEL_PORT": os.environ.get("CDW_TUNNEL_PORT", cur.get("CDW_TUNNEL_PORT", "1433")),
-        # ETL bridge (ngrok -> local read-only file server in etl-bridge/).
-        "ETL_SECRET_ARN": etl_arn,
-        "ETL_BRIDGE_URL": os.environ.get("ETL_BRIDGE_URL", cur.get("ETL_BRIDGE_URL", "")),
+        # CDW endpoint the sandbox dials — the institutional DB, over the VPC
+        # egress connector. From config.yaml; env override > config.yaml > live.
+        "CDW_SERVER": os.environ.get("CDW_SERVER", db_server or cur.get("CDW_SERVER", "")),
+        "CDW_PORT": os.environ.get("CDW_PORT", db_port or cur.get("CDW_PORT", "1433")),
+        # The ETL source is cloned from GitLab into the sandbox per run, so
+        # list_etl/read_etl/grep_etl need no bridge URL and no bridge token.
+        # ETL_BRIDGE_URL / ETL_SECRET_ARN are deliberately NOT set -- stale values on
+        # the live function are dropped by this redeploy.
+        #
+        # GitLab SSH key: ARN only, exactly like the CDW login. Empty when no key was
+        # found at provision time, which simply means no GitLab access.
+        "GITLAB_SECRET_ARN": gitlab_arn or "",
+        # Which repo the agent clones. Deliberately env-driven so re-pointing needs no
+        # code change. This must be the SYNTHETIC ETL repo, never
+        # big-arc/clinical-data-warehouse/cdw: production ETL differs from what the
+        # synthetic warehouse actually runs (localized object references, plus the
+        # deliberately injected defects), so pointing at production would have the agent
+        # reading code that does not match the database it is profiling.
+        "GITLAB_ETL_REPO": os.environ.get("GITLAB_ETL_REPO", cur.get("GITLAB_ETL_REPO", "")),
+        "GITLAB_ETL_REF": os.environ.get("GITLAB_ETL_REF", cur.get("GITLAB_ETL_REF", "main")),
     }
     return deploy_lambda(lam, role_arn, env_vars)
 
@@ -412,10 +567,8 @@ def allow_gateway_to_invoke(iam, gateway_role_arn: str, lambda_arn: str) -> None
 
 
 def main() -> None:
+    require_expected_account()          # refuse to build a stack in the wrong account
     load_dotenv(HERE.parent / ".env")
-    for var in ("SANDBOX_WORKER_URL", "SANDBOX_SHARED_SECRET"):
-        if var not in os.environ:
-            sys.exit(f"{var} not set (expected in ../.env)")
     if not (HERE.parent / "config.yaml").exists():
         sys.exit("../config.yaml not found — needed for the CDW DB login")
 

@@ -4,7 +4,7 @@
 (HTTPS via Origin Access Control). Idempotent — reuses anything already created.
 Writes frontend/.frontend_config.json.
 
-    AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python setup_frontend.py
+    AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python setup_frontend.py
 
 Optional seed user so login works right away (password: >=8 chars, upper/lower/number):
     AUTODQA_UI_USER=you@example.com AUTODQA_UI_PASSWORD='Str0ngPass1' ... setup_frontend.py

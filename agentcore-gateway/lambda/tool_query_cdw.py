@@ -14,15 +14,10 @@ import sandbox_client
 import vault
 
 # Pure-Python; runs INSIDE the sandbox. Reads everything from env (injected),
-# connects through the tunnel, runs ONE read-only query, prints rows as JSON.
+# connects to the CDW, runs ONE read-only query, prints rows as JSON.
 _RUNNER = r"""
-import json, os, sys
-try:
-    import pytds
-except ImportError:
-    import subprocess
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "python-tds"], check=True)
-    import pytds
+import json, os
+import pytds  # baked into the sandbox microVM image (../../sandbox-microvm/Dockerfile)
 
 conn = pytds.connect(
     server=os.environ["CDW_SERVER"], port=int(os.environ["CDW_PORT"]),

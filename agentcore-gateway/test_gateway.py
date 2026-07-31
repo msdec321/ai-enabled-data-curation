@@ -2,7 +2,7 @@
 """Smoke test the AgentCore Gateway end to end, no AWS credentials needed:
 
   Cognito token (client credentials) -> MCP initialize -> tools/list ->
-  tools/call run_python -> Cloudflare sandbox -> result.
+  tools/call run_python -> sandbox microVM -> result.
 
     ../.venv/bin/python test_gateway.py
 """
@@ -11,6 +11,7 @@ import json
 import sys
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 from mcp import ClientSession
@@ -45,6 +46,7 @@ async def main() -> None:
 
     headers = {"Authorization": f"Bearer {token}"}
     failure = None
+    run_session = f"smoketest-{uuid.uuid4().hex[:8]}"  # unique per run, like the runtime injects
     async with streamablehttp_client(cfg["gateway_url"], headers=headers) as (r, w, _):
         async with ClientSession(r, w) as session:
             await session.initialize()
@@ -56,7 +58,7 @@ async def main() -> None:
             if not run_python:
                 failure = "run_python tool not found in gateway catalog"
             else:
-                result = await session.call_tool(run_python, {"code": "print(21 * 2)"})
+                result = await session.call_tool(run_python, {"code": "print(21 * 2)", "session": run_session})
                 text = "".join(c.text for c in result.content if hasattr(c, "text"))
                 print(f"tools/call {run_python} ->", text)
                 # the gateway JSON-encodes the Lambda's return value, so a
@@ -71,17 +73,18 @@ async def main() -> None:
                 elif not (isinstance(out, str) and out.strip() == "42"):
                     failure = f"expected sandbox output '42', got {text!r}"
 
-            # Non-fatal probe: query_cdw needs the tunnel + CDW_TUNNEL_ENDPOINT on
-            # the Lambda. Report the outcome but don't fail the smoke test on it.
+            # query_cdw reaches the institutional DB directly over the VPC egress
+            # connector — there's no tunnel to be "not up yet", so a miss here is
+            # a real regression, not an expected gap. Fail the smoke test on it.
             query_cdw = next((n for n in names if n.endswith("query_cdw")), None)
             if query_cdw:
-                res = await session.call_tool(query_cdw, {"sql": "SELECT 1 AS ok"})
+                res = await session.call_tool(query_cdw, {"sql": "SELECT 1 AS ok", "session": run_session})
                 probe = "".join(c.text for c in res.content if hasattr(c, "text"))
                 print(f"tools/call {query_cdw} (probe) ->", probe[:200])
-                if '"row_count"' in probe:
+                if "row_count" in probe:  # gateway double-encodes the string return, so quotes arrive escaped
                     print("  query_cdw: DB path is live")
                 else:
-                    print("  query_cdw: not reachable yet (expected until the tunnel is up)")
+                    failure = failure or f"query_cdw did not reach the DB: {probe[:200]}"
 
     # exit outside the async context managers to avoid exception-group noise
     if failure:

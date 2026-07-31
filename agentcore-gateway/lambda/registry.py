@@ -11,41 +11,50 @@ for reaching the sandbox backend (see sandbox_client.py), not dataset access.
 """
 import os
 
+# The CDW endpoint the sandbox dials — direct to the institutional DB over the
+# VPC egress connector (was an ngrok tunnel endpoint before the 2026-07 in-network
+# migration). Set at deploy from config.yaml's connection block. CDW_SERVER may be
+# "host" or "host:port"; a port in the host string wins over CDW_PORT.
+_ep = os.environ.get("CDW_SERVER", "<CDW_SERVER_NOT_SET>")
+if ":" in _ep:
+    _CDW_HOST, _, _p = _ep.partition(":")
+    _CDW_PORT = int(_p)
+else:
+    _CDW_HOST = _ep
+    _CDW_PORT = int(os.environ.get("CDW_PORT", "1433"))
+
 DATASETS = {
     "CDW": {
         "engine": "mssql",
         "tier": 1,  # synthetic for now; the real institutional CDW is Tier 2+
-        # `server`/`port` are the TUNNEL endpoint the sandbox dials, NOT the LAN
-        # IP — set CDW_TUNNEL_ENDPOINT/PORT on the Lambda once the tunnel is up.
+        # `server`/`port`: the CDW endpoint the sandbox dials (see CDW_SERVER/
+        # CDW_PORT above) — the institutional DB, reached over the VPC egress
+        # connector.
         "connection": {
-            "server": os.environ.get("CDW_TUNNEL_ENDPOINT", "<TUNNEL_HOST_NOT_SET>"),
-            "port": int(os.environ.get("CDW_TUNNEL_PORT", "1433")),
+            "server": _CDW_HOST,
+            "port": _CDW_PORT,
             "database": os.environ.get("CDW_DATABASE", "CDW"),
         },
         # The login (uid/pwd) lives in the vault, fetched per call.
         "credential": {"vault": "aws_sm", "id": os.environ.get("CDW_SECRET_ARN", "autodqa/cdw-readonly-login")},
         "egress": [],  # informational until the sandbox enforces per-session egress
     },
-    "ETL": {
-        "engine": "fileserver",  # read-only HTTP bridge over the ETL repo (etl-bridge/)
-        "tier": 1,  # synthetic/low-sensitivity ETL for now; secrets are denied at the bridge
-        # `base_url` is the TUNNEL endpoint the Lambda dials (ngrok -> local bridge),
-        # NOT the LAN host — set ETL_BRIDGE_URL on the Lambda once the bridge is up.
-        "connection": {
-            "base_url": os.environ.get("ETL_BRIDGE_URL", "<ETL_BRIDGE_URL_NOT_SET>"),
-        },
-        # The bridge bearer token lives in the vault, fetched per call.
-        "credential": {"vault": "aws_sm", "id": os.environ.get("ETL_SECRET_ARN", "autodqa/etl-bridge-token"), "key": "token"},
-        "egress": [],
-    },
+    # NOTE: the ETL dataset no longer appears here. list_etl / read_etl / grep_etl read
+    # the synthetic ETL repo that the sandbox clones from GitLab (see etl_sandbox.py
+    # and gitlab_clone.py). It previously carried an ngrok `base_url` plus a vaulted
+    # bearer token for the local ETL bridge (etl-bridge/), which is now unused.
+    #
+    # The GitLab SSH key IS vaulted (GITLAB_SECRET_ARN) and etl_sandbox.py fetches it
+    # per call, so unlike query_cdw the fetch is not registry-mediated. Worth revisiting:
+    # an ETL dataset entry here would put the GitLab credential under the same
+    # deny-by-default grant as the CDW login instead of beside it.
 }
 
 # Which tools may operate on which datasets (deny by default).
+# Only data access needs a grant; the ETL tools access no credentialed dataset while
+# the snapshot is staged in the sandbox image.
 GRANTS = {
     ("query_cdw", "CDW"),
-    ("list_etl", "ETL"),
-    ("read_etl", "ETL"),
-    ("grep_etl", "ETL"),
 }
 
 

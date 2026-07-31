@@ -64,6 +64,9 @@
   .line { margin: 6px 0; white-space: pre-wrap; word-break: break-word; }
   .line.result { color: #8b949e; }
   .line.error { color: #f85149; }
+  .line.sandbox { color: #58a6ff; font-size: 12px; opacity: .9; }
+  .line.done { color: #3fb950; font-size: 12px; }
+  .line.error { white-space: pre-wrap; }   /* multi-line stop reasons */
   .status { color: #8b949e; margin: 8px 0; font-size: 13px; }
   .spinner { display: inline-block; width: 11px; height: 11px; border: 2px solid #30363d;
              border-top-color: #58a6ff; border-radius: 50%; animation: spin .8s linear infinite;
@@ -156,8 +159,8 @@
 
           <g class="anode" data-id="sandbox">
             <rect x="252" y="556" width="248" height="100" rx="10" style="fill:rgb(32,32,58);stroke:rgb(130,120,216);stroke-width:1.2px"/>
-            <text x="376" y="580" text-anchor="middle" dominant-baseline="central" style="fill:rgb(196,188,242);font-size:14px;font-weight:500">Cloudflare sandbox</text>
-            <text x="376" y="602" text-anchor="middle" dominant-baseline="central" style="fill:rgb(162,150,214);font-size:12px">Graceful container create / delete</text>
+            <text x="376" y="580" text-anchor="middle" dominant-baseline="central" style="fill:rgb(196,188,242);font-size:14px;font-weight:500">Lambda MicroVM sandbox</text>
+            <text x="376" y="602" text-anchor="middle" dominant-baseline="central" style="fill:rgb(162,150,214);font-size:12px">Per-session microVM create / delete</text>
             <text x="376" y="620" text-anchor="middle" dominant-baseline="central" style="fill:rgb(162,150,214);font-size:12px">Controlled code execution</text>
             <text x="376" y="638" text-anchor="middle" dominant-baseline="central" style="fill:rgb(162,150,214);font-size:12px">Managed egress</text>
           </g>

@@ -10,7 +10,7 @@ the no-proxy architecture).
 Requires the runtime to already be switched to JWT inbound auth (re-run
 agentcore-runtime/deploy.sh after frontend/.frontend_config.json exists).
 
-    AUTODQA_UI_USER=... AUTODQA_UI_PASSWORD=... AWS_PROFILE=autodqa-admin \
+    AUTODQA_UI_USER=... AUTODQA_UI_PASSWORD=... AWS_PROFILE=bigarc-autodqa \
       AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python invoke_jwt.py "Use run_python to compute 6*7."
 """
 import json

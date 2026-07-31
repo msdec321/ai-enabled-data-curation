@@ -14,17 +14,17 @@ target and exposes two tools, both of which execute in the Cloudflare sandbox:
   no custom sandbox image needed).
 
 ```
-notebook (LangGraph) ── MCP/HTTP + OAuth ──▶ AgentCore Gateway
+AgentCore Runtime (LangGraph) ── MCP/HTTP + OAuth ──▶ AgentCore Gateway
                                                   │  Cedar policy (caller auth)
                                                   ▼
                                   Lambda autodqa-run-python  ── reads ──▶ AWS Secrets Manager
-                                  (broker: router/registry/vault)         sandbox bearer + CDW login
+                                  (broker: router/registry/vault)         CDW login
                                                   │  code + injected env (per call)
                                                   ▼
-                                       dqa-sandbox-runner (Cloudflare)
+                                       Lambda MicroVM sandbox (per session)
                                                   │  raw TCP (query_cdw only)
                                                   ▼
-                                       TCP tunnel ─▶ synthetic SQL Server (your LAN)
+                                       VPC egress ─▶ institutional synthetic SQL Server
 ```
 
 Scope: Tier-0/1 experiment, synthetic data. The broker's credential half is
@@ -42,7 +42,7 @@ vault is behind a one-class interface so the backend is swappable.
 | `lambda/tool_router.py` | Lambda entry point; routes a `tools/call` to the right tool handler by name |
 | `lambda/tool_run_python.py` | `run_python` — forward code to the sandbox |
 | `lambda/tool_query_cdw.py` | `query_cdw` — authorize, fetch DB login, run a pytds query in the sandbox |
-| `lambda/sandbox_client.py` | Shared sandbox caller; fetches the sandbox bearer (transport cred) from the vault |
+| `lambda/sandbox_client.py` | Shared sandbox caller; launches/reuses a per-session AWS Lambda MicroVM and POSTs code to it |
 | `lambda/registry.py` | `DATASETS` + `GRANTS`: dataset → connection + credential *reference*; `(tool,dataset)` allowlist. Deny by default |
 | `lambda/vault.py` | Swappable secret backend; AWS Secrets Manager today (Cloudflare Secrets Store / KSM = new class) |
 | `test_gateway.py` | End-to-end smoke test (token → tools/list → tools/call run_python → sandbox) |
@@ -52,15 +52,16 @@ vault is behind a one-class interface so the backend is swappable.
 
 The design separates them deliberately:
 
-- **Transport credential** — the sandbox bearer secret, needed to reach the
-  sandbox backend at all. Both tools use it; `sandbox_client` fetches it from
-  the vault. Source: `../.env`'s `SANDBOX_SHARED_SECRET`, vaulted as
-  `autodqa/sandbox-shared-secret`.
+- **Transport auth** — reaching the sandbox microVM uses a short-lived, per-VM
+  token minted by `create_microvm_auth_token` (sent as the `X-aws-proxy-auth`
+  header), IAM-gated by the Lambda role's `lambda:CreateMicrovmAuthToken` — so
+  there's no stored bearer secret. (The retired Cloudflare sandbox used a vaulted
+  shared secret here.)
 - **Dataset credential** — the CDW read-only login, needed only by `query_cdw`
   and only after `registry.authorize(tool, dataset)` passes. Owned by the
   dataset in the registry; the *login* is in the vault as
   `autodqa/cdw-readonly-login` (populated from `../config.yaml`'s connection
-  block). Connection coordinates (tunnel host/port, database) are non-secret and
+  block). Connection coordinates (server/port, database) are non-secret and
   live in the registry/Lambda env.
 
 `query_cdw` flow: gateway authenticates the caller → Lambda runs
@@ -69,40 +70,40 @@ the DB login → run the pytds script in the sandbox with the login + endpoint
 **injected as env vars** (never in the code body, never through the gateway,
 never persisted in the sandbox) → return rows.
 
-## Connecting the sandbox to your LAN database
+## Connecting the sandbox to the CDW
 
-The Cloudflare sandbox is in the cloud; your SQL Server is behind your LAN's
-NAT. A **dumb TCP tunnel** (no credentials, no logic) bridges them — it only
-makes the DB reachable; the login still comes from the vault.
+The sandbox MicroVM reaches the CDW **directly, in-network**: its egress runs
+through a customer-managed **VPC egress connector**
+(`agentcore-gateway/setup_vpc_egress.py`) whose ENIs live in the institutional
+VPC/subnets the firewall was opened for, so outbound TCP to the DB sources from an
+approved address. The login still comes from the vault; only the endpoint is here.
 
-`cloudflared` is awkward for raw TCP to a generic client, so use a raw-TCP
-passthrough:
-
-```bash
-ngrok tcp 1433        # -> forwarding tcp://N.tcp.ngrok.io:PORT -> localhost:1433
-```
-
-Then point the Lambda at that endpoint (these become the registry's
-`connection.server`/`port`) and redeploy:
+The connection coordinates come from `../config.yaml`'s `connection` block
+(`server`, `port`, `database`) — baked into the Lambda at deploy as
+`CDW_SERVER` / `CDW_PORT` / `CDW_DATABASE`. To point at a different DB, edit
+config.yaml and redeploy:
 
 ```bash
-export CDW_TUNNEL_ENDPOINT=N.tcp.ngrok.io CDW_TUNNEL_PORT=PORT
-AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python resume_setup.py
+AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python resume_setup.py
 ```
 
-Notes: the DB port becomes internet-reachable behind the tunnel — acceptable
-for synthetic data with a read-only login, but a reason this exact tunnel is
-PoC-only. The tunneled path requires **SQL auth** (uid/pwd), not Windows auth.
-For the real institutional CDW, the sandbox moves in-network instead of
-tunneling out — but the vault/registry/pytds code here carries forward
-unchanged; only `connection` changes.
+Notes: the path requires **SQL auth** (uid/pwd), not Windows auth. Use a
+**read-only** login (`db_datareader`) — the grant is the entire read-only
+guarantee. If the server requires encrypted connections, pytds negotiates TLS and
+today trusts the server cert without CA validation (fine for synthetic data; add a
+validated CA cert before real CDW data).
+
+> Retired (2026-07): the DB used to live on a LAN behind NAT, reached through an
+> ngrok TCP tunnel (`ngrok tcp 1433`, `CDW_TUNNEL_ENDPOINT`/`PORT`). Moving
+> in-network changed only `connection` — the vault/registry/pytds code carried
+> forward unchanged.
 
 ## Setup
 
 **1. AWS credentials.** Setup (not consumption) needs to create IAM roles,
 Lambda functions, **Secrets Manager secrets**, Cognito user pools, and AgentCore
 gateways — `bedrock-user`'s `AmazonBedrockFullAccess` is not enough. Use an
-admin-ish profile, e.g. `aws configure --profile autodqa-admin`. If scoped
+admin-ish profile, e.g. `aws configure --profile bigarc-autodqa`. If scoped
 rather than `AdministratorAccess`, it also needs `SecretsManagerReadWrite`. The
 notebook never needs these credentials; it consumes the gateway with an OAuth
 token only.
@@ -113,7 +114,7 @@ token only.
 ```bash
 cd agentcore-gateway
 ../.venv/bin/pip install "bedrock-agentcore-starter-toolkit>=0.1.10" boto3
-AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python setup_gateway.py
+AWS_PROFILE=bigarc-autodqa AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python setup_gateway.py
 ```
 
 **3. Smoke test** (no AWS credentials needed — the consumer path):
@@ -124,9 +125,10 @@ AWS_PROFILE=autodqa-admin AWS_DEFAULT_REGION=us-east-1 ../.venv/bin/python setup
 # tools/call sandbox___run_python -> 42
 ```
 
-`test_gateway.py` exercises `run_python` (no tunnel needed). `query_cdw` works
-once the tunnel is up and `CDW_TUNNEL_ENDPOINT/PORT` are set (step above). The
-Gateway prefixes each tool with its target name (`sandbox___<tool>`).
+`test_gateway.py` exercises `run_python` and `query_cdw` (the latter now hits the
+institutional DB directly over the VPC egress connector, so a DB miss fails the
+test rather than being tolerated). The Gateway prefixes each tool with its target
+name (`sandbox___<tool>`).
 
 ## Pointing the notebook at the gateway
 
@@ -159,12 +161,13 @@ mcp_client = MultiServerMCPClient({
 })
 gateway_tools = await mcp_client.get_tools()   # run_python + query_cdw
 
-TOOLS = [search_etl, read_etl_file, *gateway_tools]  # drop local run_python AND query_cdw
-agent = create_agent(model=llm, tools=TOOLS, system_prompt=SYSTEM)
+agent = create_agent(model=llm, tools=gateway_tools, system_prompt=SYSTEM)
 ```
 
-`search_etl`/`read_etl_file` stay local for now (the ETL repo is on this
-host/LAN); moving them behind the gateway is a later step.
+All nine tools now come from the gateway, including the five ETL readers.
+They used to stay local because the ETL repo was only reachable on this
+host/LAN; the sandbox now clones the synthetic ETL repo from GitLab itself
+(`lambda/gitlab_clone.py`), so nothing about the ETL is host-bound any more.
 
 ## Teardown
 
@@ -172,7 +175,6 @@ host/LAN); moving them behind the gateway is a later step.
 aws bedrock-agentcore-control delete-gateway-target --gateway-identifier <gateway_id> --target-id <target_id>
 aws bedrock-agentcore-control delete-gateway --gateway-identifier <gateway_id>
 aws lambda delete-function --function-name autodqa-run-python
-aws secretsmanager delete-secret --secret-id autodqa/sandbox-shared-secret --force-delete-without-recovery
 aws secretsmanager delete-secret --secret-id autodqa/cdw-readonly-login --force-delete-without-recovery
 aws iam delete-role-policy --role-name autodqa-gateway-lambda-role --policy-name ... && aws iam delete-role --role-name autodqa-gateway-lambda-role
 # plus the Cognito user pool the toolkit created (console: Cognito -> user pools)

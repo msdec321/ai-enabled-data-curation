@@ -13,4 +13,5 @@ def handle(event):
     data = sandbox_client.destroy_sandbox(session)
     if data.get("error"):
         return {"error": f"sandbox: {data['error']}"}
-    return f"destroyed sandbox session {session}" if data.get("destroyed") else str(data)
+    note = f" ({data['note']})" if data.get("note") else ""
+    return f"destroyed sandbox session {session}{note}" if data.get("ok") else str(data)
