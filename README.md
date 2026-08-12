@@ -40,7 +40,7 @@ Trust boundaries:
 | `agentcore-runtime/` | The main agent — LangGraph loop on Bedrock AgentCore Runtime (`entrypoint.py`, `agent.py`) with the `query_cdw`, `search_etl`/`read_etl_file`, `run_python`, etc. tools |
 | `agentcore-gateway/` | AgentCore Gateway + broker Lambda that exposes the tools over MCP (see its README) |
 | `sandbox-microvm/` | AWS Lambda MicroVM image that runs untrusted model-written code (pytds baked in) |
-| `frontend/` | Streaming web console (static files + Cognito login): submit a task and watch the agent reason/call tools/answer live. Served from the institutional Cloudflare Pages (behind Access) via the [autodqa-frontend](https://github.com/mdecaro-uth/autodqa-frontend) mirror repo; the former CloudFront/S3 hosting is decommissioned |
+| `frontend/` | Streaming web console (static files + Cognito login): submit a task and watch the agent reason/call tools/answer live. Served from the institutional Cloudflare Pages (behind Access) via the [autodqa-frontend](https://github.com/uthh-sbmi-ai/autodqa-frontend) mirror repo; the former CloudFront/S3 hosting is decommissioned |
 | `orchestrator-worker/` | Earlier Cloudflare-hosted streaming console PoC (TS Worker), synthetic data only |
 | `docs/target_architecture.md` | The code-mode architecture (diagram + trust model) |
 | `docs/` | Project Mermaid security proposal, provider evaluations, PHI data-flow inventory |
@@ -54,7 +54,7 @@ The stack is AWS-native (plus the Cloudflare AI Gateway for Bedrock BYOK). Each 
 1. **Sandbox image** — [`sandbox-microvm/`](sandbox-microvm/README.md): build the Lambda MicroVM image (pytds baked in). Writes the image ARN the gateway reads. Uses the Lambda MicroVM build API (CodeBuild-style, no local Docker).
 2. **Gateway + broker** — [`agentcore-gateway/`](agentcore-gateway/README.md): `setup_gateway.py` vaults the CDW login, deploys the broker Lambda, and creates the AgentCore Gateway + MCP target. `test_gateway.py` smoke-tests it end to end.
 3. **Runtime (the agent)** — `agentcore-runtime/deploy.sh` builds and launches the LangGraph agent on AgentCore Runtime (cloud CodeBuild ARM64; no local Docker). Inbound auth is the Cognito JWT authorizer, so the browser can invoke it directly.
-4. **Web console** — [`frontend/`](frontend/): `setup_frontend.py` provisions Cognito (its CloudFront/S3 half is retired — see `decommission_cloudfront.py`). The UI itself deploys by pushing `index.html`/`app.js`/`config.js` to the [autodqa-frontend](https://github.com/mdecaro-uth/autodqa-frontend) GitHub repo, which the institutional Cloudflare Pages serves behind Access.
+4. **Web console** — [`frontend/`](frontend/): `setup_frontend.py` provisions Cognito (its CloudFront/S3 half is retired — see `decommission_cloudfront.py`). The UI itself deploys by pushing `index.html`/`app.js`/`config.js`/`uth_logo.svg` to the [autodqa-frontend](https://github.com/uthh-sbmi-ai/autodqa-frontend) GitHub repo, which the institutional Cloudflare Pages serves behind Access.
 
 ### Shared prerequisites
 

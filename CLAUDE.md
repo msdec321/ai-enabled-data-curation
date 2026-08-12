@@ -20,7 +20,7 @@ Key places:
   runs different SQL.
 - `frontend/` — browser UI (Cognito login; calls the Runtime directly), served from
   the institutional Cloudflare Pages behind Access via the GitHub mirror repo
-  `mdecaro-uth/autodqa-frontend`; the CloudFront/S3 hosting was decommissioned
+  `uthh-sbmi-ai/autodqa-frontend`; the CloudFront/S3 hosting was decommissioned
 - `orchestrator-worker/` — earlier Cloudflare-hosted PoC (TS Worker) on synthetic data (Tier-0/1 only)
 - `docs/target_architecture.md` — the architecture and trust model
 - `config.yaml` — DB connection, ETL repo path, tables (gitignored; see `config.example.yaml`)
